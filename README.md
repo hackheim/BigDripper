@@ -16,7 +16,7 @@ The board has a nominal input voltage of 12 V, which is also the operating volta
 
 The regulator itself supports an input voltage of up to 40 V. However, the input voltage is also supplied directly to the solenoid valves. When using a voltage higher than 12 V, both the valves and all other components connected to the input-voltage rail must therefore be rated for the selected voltage.
 
-[controller](./hardware/pictures/controller.jpg)
+![controller](./hardware/pictures/controller.jpg)
 
 ### Solenoid valve control
 
@@ -38,4 +38,4 @@ All external inputs and outputs use WAGO board-to-wire lever connectors, allowin
 
 ### Schematic
 
-[schematic](./hardware/pdf/schematic.pdf)
+![schematic](./hardware/pdf/schematic.pdf)
