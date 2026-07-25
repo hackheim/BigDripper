@@ -38,4 +38,4 @@ All external inputs and outputs use WAGO board-to-wire lever connectors, allowin
 
 ### Schematic
 
-![schematic](./hardware/pdf/schematic.pdf)
+[schematic](./hardware/pdf/schematic.pdf)
