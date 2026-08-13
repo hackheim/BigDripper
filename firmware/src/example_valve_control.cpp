@@ -5,20 +5,148 @@
 const int NUM_COILS = 16;
 const uint8_t coils[NUM_COILS] = {9, 10, 11, 47, 48, 45, 1, 6, 7, 8, 38, 39, 40, 41, 42, 2};
 
-// GPIO19/20 are USB D-/D+ on the ESP32-S3. This devkit is programmed over native
-// USB (ARDUINO_USB_MODE=1, VID:PID 303A:1001), so driving them as outputs drops
-// the board off the bus and the next upload can't find it. COIL1-3 have been
-// rerouted off them, so this guard is now just a backstop against re-adding
-// them. Set to 0 only once programming moves to UART0 (GPIO43/44).
-#define SKIP_USB_PINS 1
+// Encoder
+const int NUM_ENCODER_CHANNELS = 2;
+const uint8_t encoder[NUM_ENCODER_CHANNELS] = {4,5};
 
-static bool usable(uint8_t gpio) {
-#if SKIP_USB_PINS
-  return gpio != 19 && gpio != 20;
-#else
-  return true;
-#endif
+// --- Interrupt-driven quadrature decoder -----------------------------------
+//
+// State is (A << 1) | B. Indexing this table with (previous << 2) | current
+// gives the step: +1 clockwise, -1 counter-clockwise, and 0 for the six
+// impossible transitions (both channels changing at once), which is what
+// contact bounce and missed steps look like. Rejecting those instead of
+// guessing is what keeps the count from drifting on a cheap encoder.
+//
+// DRAM_ATTR keeps the table out of flash. An IRAM ISR must not touch flash,
+// because the cache is disabled during flash writes and the fetch would fault.
+static const DRAM_ATTR int8_t QUAD_TABLE[16] = {
+   0, -1, +1,  0,
+  +1,  0,  0, -1,
+  -1,  0,  0, +1,
+   0, +1, -1,  0
+};
+
+// Same reason: plain globals live in DRAM, so cache the pins here rather than
+// reading the const encoder[] array (.rodata, i.e. flash) from the ISR.
+static uint8_t enc_pin_a = 0;
+static uint8_t enc_pin_b = 0;
+
+static volatile int32_t encoder_raw = 0;   // quarter-steps, not detents
+static volatile uint8_t encoder_prev = 0;
+static portMUX_TYPE encoder_mux = portMUX_INITIALIZER_UNLOCKED;
+
+// Set by the encoder task before it attaches the interrupt, so the ISR can wake
+// it. A plain global lives in .bss (DRAM), which an IRAM ISR may read.
+static volatile TaskHandle_t encoder_task_handle = NULL;
+
+// Most detented encoders run through a full 4-state cycle per click, so shift
+// by 2 to report detents. Set to 0 to count every edge instead.
+static const int ENCODER_DETENT_SHIFT = 2;
+
+static void ARDUINO_ISR_ATTR encoder_isr() {
+  uint8_t state = (digitalRead(enc_pin_a) << 1) | digitalRead(enc_pin_b);
+
+  portENTER_CRITICAL_ISR(&encoder_mux);
+  encoder_raw += QUAD_TABLE[(encoder_prev << 2) | state];
+  encoder_prev = state;
+  portEXIT_CRITICAL_ISR(&encoder_mux);
+
+  // Wake the encoder task instead of having it poll. The ISR stays short: it
+  // only counts, the task does anything expensive.
+  if (encoder_task_handle != NULL) {
+    BaseType_t higher_woken = pdFALSE;
+    vTaskNotifyGiveFromISR(encoder_task_handle, &higher_woken);
+    portYIELD_FROM_ISR(higher_woken);
+  }
 }
+
+// Safe to call from loop(): int32_t is not atomic against a concurrent ISR on
+// the other core, so take the same lock the ISR uses.
+int32_t encoder_position() {
+  portENTER_CRITICAL(&encoder_mux);
+  int32_t raw = encoder_raw;
+  portEXIT_CRITICAL(&encoder_mux);
+
+  // Arithmetic shift floors toward negative infinity. Dividing by 4 would
+  // truncate toward zero and make the detent straddling zero twice as wide.
+  return raw >> ENCODER_DETENT_SHIFT;
+}
+
+void encoder_zero() {
+  portENTER_CRITICAL(&encoder_mux);
+  encoder_raw = 0;
+  portEXIT_CRITICAL(&encoder_mux);
+}
+
+void encoder_begin() {
+  enc_pin_a = encoder[0];
+  enc_pin_b = encoder[1];
+
+  // Seed the previous state, otherwise the first edge is decoded against a
+  // state the encoder was never in and can produce one bogus step.
+  encoder_prev = (digitalRead(enc_pin_a) << 1) | digitalRead(enc_pin_b);
+
+  // Both channels, both edges — a quadrature cycle has four transitions and
+  // dropping any of them halves the resolution and breaks the state table.
+  attachInterrupt(digitalPinToInterrupt(enc_pin_a), encoder_isr, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(enc_pin_b), encoder_isr, CHANGE);
+}
+// ---------------------------------------------------------------------------
+
+
+// --- Core assignment -------------------------------------------------------
+//
+// Arduino's loopTask is pinned to ARDUINO_RUNNING_CORE, which this board sets to
+// 1 (see the board manifest's extra_flags). So core 1 is where setup()/loop()
+// already run, and core 0 is otherwise idle in this sketch.
+#define ENCODER_CORE 0
+#define VALVE_CORE   1
+
+// Defined below. This is a .cpp, so unlike an .ino there is no automatic
+// prototype generation.
+void test_GPIO_outputs();
+
+static void encoder_task(void *arg) {
+  // Publish the handle before attaching, so the ISR never fires with it unset.
+  encoder_task_handle = xTaskGetCurrentTaskHandle();
+
+  // attachInterrupt MUST be called from this task, not from setup(). The first
+  // attachInterrupt anywhere in the sketch calls gpio_install_isr_service(),
+  // which allocates the shared GPIO interrupt on whatever core is executing at
+  // that moment (see __attachInterruptFunctionalArg in esp32-hal-gpio.c).
+  // Calling it from setup() would bind the ISR to core 1 no matter where this
+  // task runs. Caveat: that service is shared, so every GPIO interrupt added
+  // later also lands on this core.
+  encoder_begin();
+
+  log_i("encoder task + ISR on core %d", xPortGetCoreID());
+
+  int32_t last = encoder_position();
+  for (;;) {
+    // Block until the ISR reports an edge. No polling, so IDLE0 keeps running
+    // and the task watchdog stays fed.
+    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
+    int32_t pos = encoder_position();
+    if (pos != last) {
+      log_i("encoder %+ld (%s) [core %d]",
+            (long)pos, pos > last ? "CW" : "CCW", xPortGetCoreID());
+      last = pos;
+    }
+  }
+}
+
+static void valve_task(void *arg) {
+  log_i("valve task on core %d", xPortGetCoreID());
+
+  // Blocking sequencer; delay() inside a task is vTaskDelay, so it yields the
+  // core rather than spinning.
+  test_GPIO_outputs();  // never returns
+
+  vTaskDelete(NULL);
+}
+// ---------------------------------------------------------------------------
+
 
 void setup() {
   Serial.begin(115200);
@@ -32,39 +160,68 @@ void setup() {
 
   log_i("BigDripper valve test, %d coils", NUM_COILS);
 
+  log_i("GPIO outputs:");
   for (int i = 0; i < NUM_COILS; i++) {
-    if (usable(coils[i])) {
       pinMode(coils[i], OUTPUT);
       digitalWrite(coils[i], LOW);
-      log_d("COIL%d -> GPIO%u", i + 1, coils[i]);
-    } else {
-      log_w("COIL%d -> GPIO%u skipped (USB pin)", i + 1, coils[i]);
-    }
+      log_i("COIL%d -> GPIO%u", i + 1, coils[i]);
   }
+
+  log_i("GPIO inputs:");
+  for (int i = 0; i < NUM_ENCODER_CHANNELS; i++) {
+      pinMode(encoder[i], INPUT_PULLUP);
+      log_i("ENCODER %s -> GPIO%u", i == 0 ? "A": "B", encoder[i]);
+  }
+
+  log_i("setup() on core %d", xPortGetCoreID());
+
+  // 4096-byte stacks: both tasks call log_i, and the vsnprintf underneath it is
+  // the stack-hungry part. Priorities are above loopTask's 1 so neither is
+  // starved by it; being on separate cores makes that mostly academic.
+  xTaskCreatePinnedToCore(encoder_task, "encoder", 4096, NULL, 3, NULL, ENCODER_CORE);
+  xTaskCreatePinnedToCore(valve_task,   "valve",   4096, NULL, 2, NULL, VALVE_CORE);
 }
 
 void set_coil_state(uint16_t bitVector) {
   uint16_t bit = 0x8000;  // bit 15 -> coils[0] (COIL1)
 
   for (int i = 0; i < NUM_COILS; i++) {
-    if (usable(coils[i])) {
-      digitalWrite(coils[i], (bitVector & bit) ? HIGH : LOW);
-    }
+    digitalWrite(coils[i], (bitVector & bit) ? HIGH : LOW);
     bit >>= 1;
   }
 }
 
+// Naive test function for flipping all coils on / off
+void test_GPIO_outputs() {
+  while (true) {
+    static unsigned tick = 0;
+
+    // Serial.printf: always compiled in, plain text, you control the format.
+    set_coil_state(0xFFFF);
+    log_d("[%u] coils ON  (%lu ms)", tick, millis());
+    delay(1000);
+
+    // log_*: adds level, timestamp, file:line and function; compiled out entirely
+    // when CORE_DEBUG_LEVEL is below the macro's level.
+    set_coil_state(0x0000);
+    log_d("[%u] coils OFF", tick++);
+    delay(1000);
+  }
+}
+
+// naive test function for reading encoder output
+void test_encoder() {
+  int a = digitalRead(encoder[0]);
+  int b = digitalRead(encoder[1]);
+  log_i("A:%d - B:%d", a, b);
+
+}
+
+
 void loop() {
-  static unsigned tick = 0;
-
-  // Serial.printf: always compiled in, plain text, you control the format.
-  set_coil_state(0xFFFF);
-  log_d("[%u] coils ON  (%lu ms)", tick, millis());
-  delay(1000);
-
-  // log_*: adds level, timestamp, file:line and function; compiled out entirely
-  // when CORE_DEBUG_LEVEL is below the macro's level.
-  set_coil_state(0x0000);
-  log_d("[%u] coils OFF", tick++);
-  delay(1000);
+  // Both jobs now live in their own pinned tasks, so loopTask has nothing to do.
+  // It still has to yield: returning immediately would spin core 1 at full tilt
+  // and starve the idle task. Deleting loopTask outright is the alternative, but
+  // keeping it costs nothing and leaves somewhere to put ad-hoc test code.
+  vTaskDelay(pdMS_TO_TICKS(1000));
 }
