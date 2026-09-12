@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include "wifi_text_input.h"
 
 // COIL1..COIL16 -> ESP32-S3 GPIO, in order. The state vector is MSB-first:
 // bit 15 = COIL1 (coils[0]) ... bit 0 = COIL16 (coils[15]).
@@ -180,6 +181,8 @@ void setup() {
   // starved by it; being on separate cores makes that mostly academic.
   xTaskCreatePinnedToCore(encoder_task, "encoder", 4096, NULL, 3, NULL, ENCODER_CORE);
   xTaskCreatePinnedToCore(valve_task,   "valve",   4096, NULL, 2, NULL, VALVE_CORE);
+
+  wifi_text_input_begin();
 }
 
 void set_coil_state(uint16_t bitVector) {
