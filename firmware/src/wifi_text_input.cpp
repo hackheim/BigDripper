@@ -1,5 +1,6 @@
 #include "wifi_text_input.h"
 #include "text_queue.h"
+#include "params.h"
 #include <WiFi.h>
 #include <WebServer.h>
 #include <ESPmDNS.h>
@@ -10,6 +11,10 @@
 static const char *AP_SSID = "BigDripper";
 static const char *AP_PASSWORD = "dripdrip1";  // WPA2 needs >=8 chars
 static const char *MDNS_HOSTNAME = "bigdripper";
+
+// Separate from the AP password: this gates /params, not the network itself.
+static const char *PARAMS_USER = "admin";
+static const char *PARAMS_PASSWORD = "letmeprint9";
 
 // This core is otherwise idle on this board (see example_valve_control.cpp's
 // core-assignment comment) and keeping HTTP off VALVE_CORE means it can never
@@ -38,9 +43,34 @@ ol{padding-left:1.3em} li{margin:.2em 0}
 %PENDING%
 
 <form method="POST" action="/set">
-<input type="text" name="text" maxlength="64" autofocus placeholder="Text to print">
+<input type="text" name="text" maxlength="%MAXLEN%" autofocus placeholder="Text to print">
 <button type="submit">Add to queue</button>
 </form>
+
+<p><a href="/params">Settings</a></p>
+</body></html>
+)HTML";
+
+static const char PARAMS_HTML[] PROGMEM = R"HTML(
+<!DOCTYPE html><html><head><title>BigDripper settings</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+body{font-family:sans-serif;max-width:480px;margin:2em auto;padding:0 1em}
+label{display:block;margin-top:1.2em}
+input{width:100%;font-size:1.1em;padding:.4em;box-sizing:border-box}
+button{font-size:1.2em;padding:.5em 1.5em;margin-top:1.5em}
+</style></head><body>
+<h1>Settings</h1>
+<form method="POST" action="/params/set">
+<label>Scale (mm of travel per encoder detent)
+<input type="text" inputmode="decimal" name="scale" value="%SCALE%"></label>
+<label>Max text length (characters)
+<input type="number" name="maxlen" min="1" max="255" value="%MAXLEN%"></label>
+<label>Pause between prints (ms)
+<input type="number" name="pausems" min="0" value="%PAUSEMS%"></label>
+<button type="submit">Save</button>
+</form>
+<p><a href="/">&larr; Back</a></p>
 </body></html>
 )HTML";
 
@@ -71,7 +101,43 @@ static void handle_root() {
   page.replace("%CURRENT%",
                current.length() ? html_escape(current) : "<span class=\"empty\">(none)</span>");
   page.replace("%PENDING%", pending_html);
+  page.replace("%MAXLEN%", String(params_get_max_text_len()));
   server.send(200, "text/html", page);
+}
+
+static void handle_params_page() {
+  if (!server.authenticate(PARAMS_USER, PARAMS_PASSWORD)) {
+    return server.requestAuthentication();
+  }
+  String page = FPSTR(PARAMS_HTML);
+  page.replace("%SCALE%", String(params_get_scale_mm_per_detent(), 4));
+  page.replace("%MAXLEN%", String(params_get_max_text_len()));
+  page.replace("%PAUSEMS%", String(params_get_print_pause_ms()));
+  server.send(200, "text/html", page);
+}
+
+static void handle_params_set() {
+  if (!server.authenticate(PARAMS_USER, PARAMS_PASSWORD)) {
+    return server.requestAuthentication();
+  }
+  if (server.hasArg("scale")) {
+    params_set_scale_mm_per_detent(server.arg("scale").toFloat());
+  }
+  if (server.hasArg("maxlen")) {
+    long v = server.arg("maxlen").toInt();
+    if (v > 0) {
+      params_set_max_text_len((size_t)v);
+    }
+  }
+  if (server.hasArg("pausems")) {
+    long v = server.arg("pausems").toInt();
+    if (v >= 0) {
+      params_set_print_pause_ms((uint32_t)v);
+    }
+  }
+  log_i("parameters updated");
+  server.sendHeader("Location", "/params");
+  server.send(303);
 }
 
 static void handle_set() {
@@ -106,6 +172,8 @@ static void web_task(void *arg) {
 
   server.on("/", HTTP_GET, handle_root);
   server.on("/set", HTTP_POST, handle_set);
+  server.on("/params", HTTP_GET, handle_params_page);
+  server.on("/params/set", HTTP_POST, handle_params_set);
   server.begin();
 
   for (;;) {

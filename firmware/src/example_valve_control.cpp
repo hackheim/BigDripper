@@ -1,10 +1,12 @@
 #include <Arduino.h>
 #include "wifi_text_input.h"
+#include "params.h"
+#include "font.h"
 
 // COIL1..COIL16 -> ESP32-S3 GPIO, in order. The state vector is MSB-first:
 // bit 15 = COIL1 (coils[0]) ... bit 0 = COIL16 (coils[15]).
 const int NUM_COILS = 16;
-const uint8_t coils[NUM_COILS] = {9, 10, 11, 47, 48, 45, 1, 6, 7, 8, 38, 39, 40, 41, 42, 2};
+const uint8_t coils[NUM_COILS] = {9, 10, 11, 12, 48, 45, 1, 6, 7, 8, 38, 39, 40, 41, 42, 2};
 
 // Encoder
 const int NUM_ENCODER_CHANNELS = 2;
@@ -182,7 +184,18 @@ void setup() {
   xTaskCreatePinnedToCore(encoder_task, "encoder", 4096, NULL, 3, NULL, ENCODER_CORE);
   xTaskCreatePinnedToCore(valve_task,   "valve",   4096, NULL, 2, NULL, VALVE_CORE);
 
+  params_begin();
   wifi_text_input_begin();
+
+  // No print engine consumes the font yet, so dump a sample over serial to
+  // sanity-check glyphs by eye. Safe to delete once the font is trusted.
+  font_init();
+  log_i("font self-test:");
+  const char *sample = "HELLO 0123456789";
+  for (const char *c = sample; *c; c++) {
+    log_i("'%c':", *c);
+    font_print_ascii(*c);
+  }
 }
 
 void set_coil_state(uint16_t bitVector) {

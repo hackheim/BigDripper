@@ -9,10 +9,10 @@
 // either core.
 
 const size_t TEXT_QUEUE_MAX_DEPTH = 8;
-const size_t TEXT_QUEUE_MAX_LEN = 64;
 
 // Adds a text to the back of the queue. Returns false (no-op) if the text is
-// empty, too long, or the queue is already at TEXT_QUEUE_MAX_DEPTH.
+// empty, longer than params_get_max_text_len(), or the queue is already at
+// TEXT_QUEUE_MAX_DEPTH.
 bool text_queue_push(const String &text);
 
 // The text currently being printed, i.e. the front of the queue. Empty
@@ -25,8 +25,6 @@ std::vector<String> text_queue_pending();
 
 // Called by the print engine once the encoder has scanned past the current
 // text's full length. Pops it and starts a pause; the next text (if any)
-// becomes current once TEXT_QUEUE_PAUSE_MS has elapsed. No-op if the queue
-// is already empty.
+// becomes current once params_get_print_pause_ms() has elapsed. No-op if the
+// queue is already empty.
 void text_queue_advance();
-
-const uint32_t TEXT_QUEUE_PAUSE_MS = 2000;
