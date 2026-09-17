@@ -2,6 +2,7 @@
 #include "wifi_text_input.h"
 #include "params.h"
 #include "font.h"
+#include "text_queue.h"
 
 // COIL1..COIL16 -> ESP32-S3 GPIO, in order. The state vector is MSB-first:
 // bit 15 = COIL1 (coils[0]) ... bit 0 = COIL16 (coils[15]).
@@ -108,6 +109,7 @@ void encoder_begin() {
 // Defined below. This is a .cpp, so unlike an .ino there is no automatic
 // prototype generation.
 void test_GPIO_outputs();
+void print_engine_run();
 
 static void encoder_task(void *arg) {
   // Publish the handle before attaching, so the ISR never fires with it unset.
@@ -124,6 +126,14 @@ static void encoder_task(void *arg) {
 
   log_i("encoder task + ISR on core %d", xPortGetCoreID());
 
+  // Logging every single detent works fine for a slow test turn, but a fast
+  // spin can notify this task faster than a UART write at 115200 baud can
+  // drain (log_i's underlying uart_tx busy-waits for FIFO space), which was
+  // starving IDLE0 on this core long enough to trip the task watchdog. Cap
+  // how often we actually log; position tracking itself stays uncapped.
+  const uint32_t LOG_INTERVAL_MS = 50;
+  uint32_t last_log_ms = 0;
+
   int32_t last = encoder_position();
   for (;;) {
     // Block until the ISR reports an edge. No polling, so IDLE0 keeps running
@@ -132,8 +142,12 @@ static void encoder_task(void *arg) {
 
     int32_t pos = encoder_position();
     if (pos != last) {
-      log_i("encoder %+ld (%s) [core %d]",
-            (long)pos, pos > last ? "CW" : "CCW", xPortGetCoreID());
+      uint32_t now = millis();
+      if (now - last_log_ms >= LOG_INTERVAL_MS) {
+        log_i("encoder %+ld (%s) [core %d]",
+              (long)pos, pos > last ? "CW" : "CCW", xPortGetCoreID());
+        last_log_ms = now;
+      }
       last = pos;
     }
   }
@@ -144,7 +158,7 @@ static void valve_task(void *arg) {
 
   // Blocking sequencer; delay() inside a task is vTaskDelay, so it yields the
   // core rather than spinning.
-  test_GPIO_outputs();  // never returns
+  print_engine_run();  // never returns
 
   vTaskDelete(NULL);
 }
@@ -178,24 +192,20 @@ void setup() {
 
   log_i("setup() on core %d", xPortGetCoreID());
 
+  // params_begin()/font_init() must complete before the tasks below start,
+  // since valve_task's print engine reads params and glyphs from the moment
+  // it runs, and valve_task's priority is high enough to preempt setup()
+  // (still running as loopTask) as soon as it's created.
+  params_begin();
+  font_init();
+
   // 4096-byte stacks: both tasks call log_i, and the vsnprintf underneath it is
   // the stack-hungry part. Priorities are above loopTask's 1 so neither is
   // starved by it; being on separate cores makes that mostly academic.
   xTaskCreatePinnedToCore(encoder_task, "encoder", 4096, NULL, 3, NULL, ENCODER_CORE);
   xTaskCreatePinnedToCore(valve_task,   "valve",   4096, NULL, 2, NULL, VALVE_CORE);
 
-  params_begin();
   wifi_text_input_begin();
-
-  // No print engine consumes the font yet, so dump a sample over serial to
-  // sanity-check glyphs by eye. Safe to delete once the font is trusted.
-  font_init();
-  log_i("font self-test:");
-  const char *sample = "HELLO 0123456789";
-  for (const char *c = sample; *c; c++) {
-    log_i("'%c':", *c);
-    font_print_ascii(*c);
-  }
 }
 
 void set_coil_state(uint16_t bitVector) {
@@ -231,6 +241,98 @@ void test_encoder() {
   int b = digitalRead(encoder[1]);
   log_i("A:%d - B:%d", a, b);
 
+}
+
+// Scans across the text currently at the front of the queue, driven by the
+// encoder: params_get_clicks_per_column() detents move the scan one glyph
+// column. Re-zeroes the encoder every time a new text becomes current, so
+// column 0 always lines up with wherever the wheel happens to be when that
+// text starts printing.
+void print_engine_run() {
+  String current = "";
+  int32_t last_column = -1;
+
+  // Coils fire a brief burst when the scan lands on a column, rather than
+  // staying on until the scan reaches the next one. coil_off_at_ms is when
+  // the current burst should end.
+  bool coil_on = false;
+  uint32_t coil_off_at_ms = 0;
+
+  // See encoder_task()'s LOG_INTERVAL_MS comment: a fast spin can change
+  // columns faster than a UART write drains, so cap how often we log a
+  // column change even though we still render every one.
+  const uint32_t LOG_INTERVAL_MS = 50;
+  uint32_t last_log_ms = 0;
+
+  while (true) {
+    String text = text_queue_current();
+    if (text != current) {
+      current = text;
+      last_column = -1;
+      coil_on = false;
+      encoder_zero();
+      log_i("print engine: now printing \"%s\"", current.c_str());
+    }
+
+    if (current.length() == 0) {
+      set_coil_state(0x0000);
+      coil_on = false;
+      delay(5);
+      continue;
+    }
+
+    int32_t clicks_per_column = (int32_t)params_get_clicks_per_column();
+    if (clicks_per_column <= 0) clicks_per_column = 1;
+
+    // Scanning backwards past the start of the text clamps at column 0
+    // rather than going negative.
+    int32_t pos = encoder_position();
+    int32_t column = (pos > 0) ? (pos / clicks_per_column) : 0;
+
+    int32_t total_columns = (int32_t)current.length() * FONT_CHAR_WIDTH;
+    if (column >= total_columns) {
+      log_i("print engine: done, advancing queue");
+      set_coil_state(0x0000);
+      coil_on = false;
+      text_queue_advance();
+      delay(5);
+      continue;
+    }
+
+    if (column != last_column) {
+      int char_index = column / FONT_CHAR_WIDTH;
+      int col_in_char = column % FONT_CHAR_WIDTH;
+
+      // col_in_char == FONT_GLYPH_WIDTH is the blank inter-character
+      // spacing column, so bits stays 0 (all coils off, no burst) for it.
+      uint16_t bits = 0;
+      if (col_in_char < FONT_GLYPH_WIDTH) {
+        uint16_t glyph[FONT_GLYPH_WIDTH];
+        font_get_glyph(current[char_index], glyph);
+        bits = glyph[col_in_char];
+      }
+
+      set_coil_state(bits);
+      coil_on = true;
+      coil_off_at_ms = millis() + params_get_column_burst_ms();
+      last_column = column;
+
+      uint32_t now = millis();
+      if (now - last_log_ms >= LOG_INTERVAL_MS) {
+        log_i("print engine: pos=%ld col=%ld/%ld char='%c' bits=0x%04x",
+              (long)pos, (long)column, (long)total_columns, current[char_index], bits);
+        last_log_ms = now;
+      }
+    } else if (coil_on && (int32_t)(millis() - coil_off_at_ms) >= 0) {
+      // Wraparound-safe "has the burst timer elapsed" check: millis()
+      // overflows every ~49 days, and the signed subtraction stays correct
+      // across that wrap.
+      set_coil_state(0x0000);
+      coil_on = false;
+    }
+
+    delay(5);
+  }
 }
 
 

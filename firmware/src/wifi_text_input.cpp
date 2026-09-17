@@ -68,6 +68,8 @@ button{font-size:1.2em;padding:.5em 1.5em;margin-top:1.5em}
 <input type="number" name="maxlen" min="1" max="255" value="%MAXLEN%"></label>
 <label>Pause between prints (ms)
 <input type="number" name="pausems" min="0" value="%PAUSEMS%"></label>
+<label>Column burst duration (ms)
+<input type="number" name="burstms" min="0" value="%BURSTMS%"></label>
 <button type="submit">Save</button>
 </form>
 <p><a href="/">&larr; Back</a></p>
@@ -113,6 +115,7 @@ static void handle_params_page() {
   page.replace("%SCALE%", String(params_get_scale_mm_per_detent(), 4));
   page.replace("%MAXLEN%", String(params_get_max_text_len()));
   page.replace("%PAUSEMS%", String(params_get_print_pause_ms()));
+  page.replace("%BURSTMS%", String(params_get_column_burst_ms()));
   server.send(200, "text/html", page);
 }
 
@@ -133,6 +136,12 @@ static void handle_params_set() {
     long v = server.arg("pausems").toInt();
     if (v >= 0) {
       params_set_print_pause_ms((uint32_t)v);
+    }
+  }
+  if (server.hasArg("burstms")) {
+    long v = server.arg("burstms").toInt();
+    if (v >= 0) {
+      params_set_column_burst_ms((uint32_t)v);
     }
   }
   log_i("parameters updated");
