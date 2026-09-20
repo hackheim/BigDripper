@@ -7,7 +7,7 @@
 // COIL1..COIL16 -> ESP32-S3 GPIO, in order. The state vector is MSB-first:
 // bit 15 = COIL1 (coils[0]) ... bit 0 = COIL16 (coils[15]).
 const int NUM_COILS = 16;
-const uint8_t coils[NUM_COILS] = {9, 10, 11, 12, 48, 45, 1, 6, 7, 8, 38, 39, 40, 41, 42, 2};
+const uint8_t coils[NUM_COILS] = {9, 11, 10, 12, 48, 45, 1, 6, 2, 42, 41, 40, 39, 38, 8, 7};
 
 // Encoder
 const int NUM_ENCODER_CHANNELS = 2;
@@ -337,6 +337,12 @@ void print_engine_run() {
 
 
 void loop() {
+  // for (int i=0; i< 16; i++) {
+  //   digitalWrite(coils[i], HIGH);
+  //   vTaskDelay(pdMS_TO_TICKS(1000));
+  // }
+
+
   // Both jobs now live in their own pinned tasks, so loopTask has nothing to do.
   // It still has to yield: returning immediately would spin core 1 at full tilt
   // and starve the idle task. Deleting loopTask outright is the alternative, but
