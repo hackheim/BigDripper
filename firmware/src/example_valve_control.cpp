@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <Adafruit_NeoPixel.h>
 #include "wifi_text_input.h"
 #include "params.h"
 #include "font.h"
@@ -7,7 +8,14 @@
 // COIL1..COIL16 -> ESP32-S3 GPIO, in order. The state vector is MSB-first:
 // bit 15 = COIL1 (coils[0]) ... bit 0 = COIL16 (coils[15]).
 const int NUM_COILS = 16;
+const int NUM_NEOPIXEL_STRIPS = 4;
 const uint8_t coils[NUM_COILS] = {9, 11, 10, 12, 48, 45, 1, 6, 2, 42, 41, 40, 39, 38, 8, 7};
+const uint8_t neopixels[NUM_NEOPIXEL_STRIPS] = {15, 16, 17, 18};
+
+// 8-pixel ring on the first neopixel GPIO. The other three pins are reserved
+// for future strips and aren't driven yet.
+const int NEOPIXEL_RING_PIXELS = 8;
+Adafruit_NeoPixel neopixel_ring(NEOPIXEL_RING_PIXELS, neopixels[0], NEO_GRB + NEO_KHZ800);
 
 // Encoder
 const int NUM_ENCODER_CHANNELS = 2;
@@ -162,6 +170,33 @@ static void valve_task(void *arg) {
 
   vTaskDelete(NULL);
 }
+
+// Slow red breathe: a sine wave keeps the fade smooth at both ends, unlike a
+// linear ramp which looks like it "hangs" near full brightness/off.
+static void neopixel_task(void *arg) {
+  log_i("neopixel task on core %d", xPortGetCoreID());
+
+  neopixel_ring.begin();
+  neopixel_ring.show();  // all off
+
+  const uint32_t PULSE_PERIOD_MS = 4000;
+  const uint32_t UPDATE_INTERVAL_MS = 20;  // ~50 Hz, smooth without flooding the bus
+
+  for (;;) {
+    uint32_t phase_ms = millis() % PULSE_PERIOD_MS;
+    float phase = (2.0f * PI * phase_ms) / PULSE_PERIOD_MS;
+    float brightness = (sinf(phase - PI / 2.0f) + 1.0f) / 2.0f;  // 0..1, starts at 0
+
+    uint8_t red = (uint8_t)(brightness * 255.0f);
+    uint32_t color = neopixel_ring.Color(red, 0, 0);
+    for (int i = 0; i < NEOPIXEL_RING_PIXELS; i++) {
+      neopixel_ring.setPixelColor(i, color);
+    }
+    neopixel_ring.show();
+
+    vTaskDelay(pdMS_TO_TICKS(UPDATE_INTERVAL_MS));
+  }
+}
 // ---------------------------------------------------------------------------
 
 
@@ -202,8 +237,9 @@ void setup() {
   // 4096-byte stacks: both tasks call log_i, and the vsnprintf underneath it is
   // the stack-hungry part. Priorities are above loopTask's 1 so neither is
   // starved by it; being on separate cores makes that mostly academic.
-  xTaskCreatePinnedToCore(encoder_task, "encoder", 4096, NULL, 3, NULL, ENCODER_CORE);
-  xTaskCreatePinnedToCore(valve_task,   "valve",   4096, NULL, 2, NULL, VALVE_CORE);
+  xTaskCreatePinnedToCore(encoder_task,   "encoder",   4096, NULL, 3, NULL, ENCODER_CORE);
+  xTaskCreatePinnedToCore(valve_task,     "valve",     4096, NULL, 2, NULL, VALVE_CORE);
+  xTaskCreatePinnedToCore(neopixel_task,  "neopixel",  2048, NULL, 1, NULL, ENCODER_CORE);
 
   wifi_text_input_begin();
 }
