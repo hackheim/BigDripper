@@ -4,6 +4,8 @@
 #include "params.h"
 #include "font.h"
 #include "text_queue.h"
+#include "priming.h"
+#include "trace.h"
 
 // COIL1..COIL16 -> ESP32-S3 GPIO, in order. The state vector is MSB-first:
 // bit 15 = COIL1 (coils[0]) ... bit 0 = COIL16 (coils[15]).
@@ -300,12 +302,78 @@ void print_engine_run() {
   const uint32_t LOG_INTERVAL_MS = 50;
   uint32_t last_log_ms = 0;
 
+  bool was_priming = false;
+  bool was_tracing = false;
+
+  // Set when leaving trace mode: the next column the scan reports is taken
+  // as the new baseline instead of being fired, so stopping trace leaves
+  // every valve closed rather than jumping straight into a burst for
+  // wherever the wheel ended up.
+  bool resync_column = false;
+
   while (true) {
+    if (priming_is_active()) {
+      // Manual override: hold every valve open regardless of scan state
+      // until the web UI's "priming finished" clears this.
+      set_coil_state(0xFFFF);
+      coil_on = false;
+      was_priming = true;
+      delay(5);
+      continue;
+    }
+    if (was_priming) {
+      // Just came out of priming: close everything before resuming the
+      // scan, rather than falling through to whatever bits the current
+      // column happens to render.
+      set_coil_state(0x0000);
+      was_priming = false;
+    }
+
+    if (trace_is_active()) {
+      // Debug pulse: all coils on for exactly the configured burst, then
+      // all off for the configured trace gap. Blocking is fine here since nothing else
+      // runs while tracing. Log after the burst, not during, so a slow
+      // UART write can't stretch the pulse being measured.
+      was_tracing = true;
+      uint32_t burst_ms = params_get_column_burst_ms();
+      uint32_t start_us = micros();
+      set_coil_state(0xFFFF);
+      // Poll rather than delay(burst_ms) so "trace off" closes the valves
+      // immediately even in the middle of a long burst.
+      uint32_t burst_start = millis();
+      while (millis() - burst_start < burst_ms && trace_is_active() && !priming_is_active()) {
+        delay(1);
+      }
+      set_coil_state(0x0000);
+      uint32_t elapsed_us = micros() - start_us;
+      coil_on = false;
+      log_i("trace: all coils ON for %lu ms (measured %lu us)",
+            (unsigned long)burst_ms, (unsigned long)elapsed_us);
+
+      // Off period, polled in small steps so "trace off" and priming take
+      // effect promptly instead of after the full gap.
+      uint32_t gap_ms = params_get_trace_gap_ms();
+      uint32_t off_start = millis();
+      while (millis() - off_start < gap_ms && trace_is_active() && !priming_is_active()) {
+        delay(5);
+      }
+      continue;
+    }
+    if (was_tracing) {
+      set_coil_state(0x0000);
+      coil_on = false;
+      resync_column = true;
+      was_tracing = false;
+      log_i("trace: stopped, all coils closed");
+    }
+
     String text = text_queue_current();
     if (text != current) {
       current = text;
       last_column = -1;
       coil_on = false;
+      // A new text starting is a deliberate print, so fire its first column.
+      resync_column = false;
       encoder_zero();
       log_i("print engine: now printing \"%s\"", current.c_str());
     }
@@ -333,6 +401,11 @@ void print_engine_run() {
       text_queue_advance();
       delay(5);
       continue;
+    }
+
+    if (resync_column) {
+      last_column = column;
+      resync_column = false;
     }
 
     if (column != last_column) {

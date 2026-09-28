@@ -1,6 +1,8 @@
 #include "wifi_text_input.h"
 #include "text_queue.h"
 #include "params.h"
+#include "priming.h"
+#include "trace.h"
 #include <WiFi.h>
 #include <WebServer.h>
 #include <ESPmDNS.h>
@@ -33,8 +35,26 @@ button{font-size:1.2em;padding:.5em 1.5em;margin-top:.5em}
 ol{padding-left:1.3em} li{margin:.2em 0}
 .current{font-weight:bold}
 .empty{color:#888;font-style:italic}
+.priming button{background:#c0392b;color:#fff}
+.priming-status{font-weight:bold}
 </style></head><body>
 <h1>BigDripper</h1>
+
+<p>Priming: <span class="priming-status">%PRIMING%</span></p>
+<form class="priming" method="POST" action="/prime/start">
+<button type="submit">Prime system</button>
+</form>
+<form method="POST" action="/prime/stop">
+<button type="submit">Priming finished</button>
+</form>
+
+<p>Trace: <span class="priming-status">%TRACE%</span></p>
+<form method="POST" action="/trace/start">
+<button type="submit">Trace on</button>
+</form>
+<form method="POST" action="/trace/stop">
+<button type="submit">Trace off</button>
+</form>
 
 <p>Now printing:</p>
 <p class="current">%CURRENT%</p>
@@ -70,6 +90,8 @@ button{font-size:1.2em;padding:.5em 1.5em;margin-top:1.5em}
 <input type="number" name="pausems" min="0" value="%PAUSEMS%"></label>
 <label>Column burst duration (ms)
 <input type="number" name="burstms" min="0" value="%BURSTMS%"></label>
+<label>Trace delay between bursts (ms)
+<input type="number" name="tracegapms" min="0" value="%TRACEGAPMS%"></label>
 <button type="submit">Save</button>
 </form>
 <p><a href="/">&larr; Back</a></p>
@@ -104,6 +126,8 @@ static void handle_root() {
                current.length() ? html_escape(current) : "<span class=\"empty\">(none)</span>");
   page.replace("%PENDING%", pending_html);
   page.replace("%MAXLEN%", String(params_get_max_text_len()));
+  page.replace("%PRIMING%", priming_is_active() ? "ON" : "off");
+  page.replace("%TRACE%", trace_is_active() ? "ON" : "off");
   server.send(200, "text/html", page);
 }
 
@@ -116,6 +140,7 @@ static void handle_params_page() {
   page.replace("%MAXLEN%", String(params_get_max_text_len()));
   page.replace("%PAUSEMS%", String(params_get_print_pause_ms()));
   page.replace("%BURSTMS%", String(params_get_column_burst_ms()));
+  page.replace("%TRACEGAPMS%", String(params_get_trace_gap_ms()));
   server.send(200, "text/html", page);
 }
 
@@ -144,6 +169,12 @@ static void handle_params_set() {
       params_set_column_burst_ms((uint32_t)v);
     }
   }
+  if (server.hasArg("tracegapms")) {
+    long v = server.arg("tracegapms").toInt();
+    if (v >= 0) {
+      params_set_trace_gap_ms((uint32_t)v);
+    }
+  }
   log_i("parameters updated");
   server.sendHeader("Location", "/params");
   server.send(303);
@@ -159,6 +190,36 @@ static void handle_set() {
     }
   }
   // 303 -> GET / so a page refresh doesn't resubmit the form.
+  server.sendHeader("Location", "/");
+  server.send(303);
+}
+
+static void handle_prime_start() {
+  priming_start();
+  log_i("priming started, all valves open");
+  server.sendHeader("Location", "/");
+  server.send(303);
+}
+
+static void handle_prime_stop() {
+  priming_stop();
+  log_i("priming finished, all valves closed");
+  server.sendHeader("Location", "/");
+  server.send(303);
+}
+
+static void handle_trace_start() {
+  trace_start();
+  log_i("trace started, pulsing all valves for %lu ms with %lu ms between bursts",
+        (unsigned long)params_get_column_burst_ms(),
+        (unsigned long)params_get_trace_gap_ms());
+  server.sendHeader("Location", "/");
+  server.send(303);
+}
+
+static void handle_trace_stop() {
+  trace_stop();
+  log_i("trace stopped");
   server.sendHeader("Location", "/");
   server.send(303);
 }
@@ -181,6 +242,10 @@ static void web_task(void *arg) {
 
   server.on("/", HTTP_GET, handle_root);
   server.on("/set", HTTP_POST, handle_set);
+  server.on("/prime/start", HTTP_POST, handle_prime_start);
+  server.on("/prime/stop", HTTP_POST, handle_prime_stop);
+  server.on("/trace/start", HTTP_POST, handle_trace_start);
+  server.on("/trace/stop", HTTP_POST, handle_trace_stop);
   server.on("/params", HTTP_GET, handle_params_page);
   server.on("/params/set", HTTP_POST, handle_params_set);
   server.begin();

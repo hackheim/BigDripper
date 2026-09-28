@@ -26,6 +26,11 @@ void params_set_clicks_per_column(uint32_t v);
 uint32_t params_get_column_burst_ms();
 void params_set_column_burst_ms(uint32_t v);
 
+// Debug trace mode only: how long all coils stay off between bursts, in
+// milliseconds. The burst itself uses params_get_column_burst_ms().
+uint32_t params_get_trace_gap_ms();
+void params_set_trace_gap_ms(uint32_t v);
+
 // Longest text the queue will accept, in characters.
 size_t params_get_max_text_len();
 void params_set_max_text_len(size_t v);
