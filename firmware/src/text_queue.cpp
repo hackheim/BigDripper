@@ -9,6 +9,8 @@ static std::deque<String> queue;
 // the gap between one printed text and the next. 0 means "not paused".
 static uint32_t pause_until_ms = 0;
 
+const char TEXT_QUEUE_DEFAULT_TEXT[] = " BIG DRIPPER ";
+
 bool text_queue_push(const String &text) {
   if (text.length() == 0 || text.length() > params_get_max_text_len()) {
     return false;
@@ -29,6 +31,14 @@ String text_queue_current() {
   String current = (!paused && !queue.empty()) ? queue.front() : String("");
   xSemaphoreGive(queue_mutex);
   return current;
+}
+
+bool text_queue_is_idle() {
+  xSemaphoreTake(queue_mutex, portMAX_DELAY);
+  bool paused = pause_until_ms != 0 && millis() < pause_until_ms;
+  bool idle = !paused && queue.empty();
+  xSemaphoreGive(queue_mutex);
+  return idle;
 }
 
 std::vector<String> text_queue_pending() {

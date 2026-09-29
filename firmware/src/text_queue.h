@@ -20,6 +20,14 @@ bool text_queue_push(const String &text);
 // queue has nothing left.
 String text_queue_current();
 
+// True when there's nothing to print at all: the queue is empty and no
+// inter-print pause is running. The print engine plays
+// TEXT_QUEUE_DEFAULT_TEXT on repeat while this holds.
+bool text_queue_is_idle();
+
+// Printed on a loop whenever the queue is idle.
+extern const char TEXT_QUEUE_DEFAULT_TEXT[];
+
 // Snapshot of everything waiting behind the current text, in print order.
 std::vector<String> text_queue_pending();
 

@@ -122,8 +122,15 @@ static void handle_root() {
   }
 
   String page = FPSTR(PAGE_HTML);
-  page.replace("%CURRENT%",
-               current.length() ? html_escape(current) : "<span class=\"empty\">(none)</span>");
+  String current_html;
+  if (current.length()) {
+    current_html = html_escape(current);
+  } else if (text_queue_is_idle()) {
+    current_html = html_escape(TEXT_QUEUE_DEFAULT_TEXT) + " <span class=\"empty\">(default, on repeat)</span>";
+  } else {
+    current_html = "<span class=\"empty\">(pause)</span>";
+  }
+  page.replace("%CURRENT%", current_html);
   page.replace("%PENDING%", pending_html);
   page.replace("%MAXLEN%", String(params_get_max_text_len()));
   page.replace("%PRIMING%", priming_is_active() ? "ON" : "off");

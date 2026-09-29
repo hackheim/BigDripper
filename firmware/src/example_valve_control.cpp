@@ -11,7 +11,7 @@
 // bit 15 = COIL1 (coils[0]) ... bit 0 = COIL16 (coils[15]).
 const int NUM_COILS = 16;
 const int NUM_NEOPIXEL_STRIPS = 4;
-const uint8_t coils[NUM_COILS] = {9, 11, 10, 12, 48, 45, 1, 6, 2, 42, 41, 40, 39, 38, 8, 7};
+const uint8_t coils[NUM_COILS] = {9, 11, 10, 12, 14, 13, 1, 6, 7, 8, 38, 39, 40, 41, 42, 2};
 const uint8_t neopixels[NUM_NEOPIXEL_STRIPS] = {15, 16, 17, 18};
 
 // 8-pixel ring on the first neopixel GPIO. The other three pins are reserved
@@ -290,6 +290,11 @@ void print_engine_run() {
   String current = "";
   int32_t last_column = -1;
 
+  // True while printing TEXT_QUEUE_DEFAULT_TEXT because nothing is queued.
+  // Tracked as a flag rather than by comparing strings, so a user who
+  // queues the same text still gets it printed once and advanced past.
+  bool looping_default = false;
+
   // Coils fire a brief burst when the scan lands on a column, rather than
   // staying on until the scan reaches the next one. coil_off_at_ms is when
   // the current burst should end.
@@ -368,8 +373,13 @@ void print_engine_run() {
     }
 
     String text = text_queue_current();
-    if (text != current) {
+    bool use_default = text.length() == 0 && text_queue_is_idle();
+    if (use_default) {
+      text = TEXT_QUEUE_DEFAULT_TEXT;
+    }
+    if (text != current || use_default != looping_default) {
       current = text;
+      looping_default = use_default;
       last_column = -1;
       coil_on = false;
       // A new text starting is a deliberate print, so fire its first column.
@@ -394,7 +404,11 @@ void print_engine_run() {
     int32_t column = (pos > 0) ? (pos / clicks_per_column) : 0;
 
     int32_t total_columns = (int32_t)current.length() * FONT_CHAR_WIDTH;
-    if (column >= total_columns) {
+    if (looping_default) {
+      // Wrap instead of advancing, so the default text repeats seamlessly
+      // for as long as the wheel keeps turning.
+      column %= total_columns;
+    } else if (column >= total_columns) {
       log_i("print engine: done, advancing queue");
       set_coil_state(0x0000);
       coil_on = false;
@@ -444,13 +458,28 @@ void print_engine_run() {
   }
 }
 
+void demoLEDs() {
+  for (int i=0; i< 16; i++) {
+    digitalWrite(coils[i], HIGH);
+    vTaskDelay(pdMS_TO_TICKS(100));
+    digitalWrite(coils[i], LOW);
+    vTaskDelay(pdMS_TO_TICKS(50));
+  }
+
+  for (int j=0; j< 3; j++) {
+    for (int i=0; i< 16; i++) {
+        digitalWrite(coils[i], HIGH);
+      }
+      vTaskDelay(pdMS_TO_TICKS(100));
+
+      for (int i=0; i< 16; i++) {
+        digitalWrite(coils[i], LOW);
+      }
+      vTaskDelay(pdMS_TO_TICKS(100));
+  }
+}
 
 void loop() {
-  // for (int i=0; i< 16; i++) {
-  //   digitalWrite(coils[i], HIGH);
-  //   vTaskDelay(pdMS_TO_TICKS(1000));
-  // }
-
 
   // Both jobs now live in their own pinned tasks, so loopTask has nothing to do.
   // It still has to yield: returning immediately would spin core 1 at full tilt
