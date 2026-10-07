@@ -1,5 +1,7 @@
 #include <Arduino.h>
 #include <Adafruit_NeoPixel.h>
+#include "esp_timer.h"
+#include "soc/gpio_struct.h"
 #include "wifi_text_input.h"
 #include "params.h"
 #include "font.h"
@@ -13,6 +15,28 @@ const int NUM_COILS = 16;
 const int NUM_NEOPIXEL_STRIPS = 4;
 const uint8_t coils[NUM_COILS] = {9, 11, 10, 12, 14, 13, 1, 6, 7, 8, 38, 39, 40, 41, 42, 2};
 const uint8_t neopixels[NUM_NEOPIXEL_STRIPS] = {15, 16, 17, 18};
+
+// Per-coil register info for set_coil_state(), filled in by coils_begin().
+// GPIO 0-31 live in bank 0 (GPIO.out_w1ts/out_w1tc); GPIO 32+ live in bank 1
+// (GPIO.out1_w1ts.val/out1_w1tc.val). Precomputing which bank each coil's pin
+// falls in, and its bit mask within that bank, means set_coil_state() can
+// turn a 16-bit pattern into 4 register writes instead of 16 digitalWrite()
+// calls, so every coil switches in the same instant rather than one at a time.
+static uint32_t coil_mask[NUM_COILS];
+static bool coil_is_bank1[NUM_COILS];
+
+void coils_begin() {
+  for (int i = 0; i < NUM_COILS; i++) {
+    uint8_t pin = coils[i];
+    if (pin < 32) {
+      coil_is_bank1[i] = false;
+      coil_mask[i] = 1UL << pin;
+    } else {
+      coil_is_bank1[i] = true;
+      coil_mask[i] = 1UL << (pin - 32);
+    }
+  }
+}
 
 // Strip 1 (first neopixel GPIO) pulses red; strip 2 (second GPIO) runs a
 // yellow Cylon eye. The other two pins are reserved and aren't driven yet.
@@ -55,6 +79,12 @@ static portMUX_TYPE encoder_mux = portMUX_INITIALIZER_UNLOCKED;
 // it. A plain global lives in .bss (DRAM), which an IRAM ISR may read.
 static volatile TaskHandle_t encoder_task_handle = NULL;
 
+// Set by valve_task (via print_engine_run()) so the same ISR can also wake the
+// print engine immediately on encoder movement, instead of it polling on a
+// fixed tick. Independent of encoder_task_handle's publish order — the ISR
+// null-checks each handle on its own.
+static volatile TaskHandle_t valve_task_handle = NULL;
+
 // Most detented encoders run through a full 4-state cycle per click, so shift
 // by 2 to report detents. Set to 0 to count every edge instead.
 static const int ENCODER_DETENT_SHIFT = 2;
@@ -67,13 +97,20 @@ static void ARDUINO_ISR_ATTR encoder_isr() {
   encoder_prev = state;
   portEXIT_CRITICAL_ISR(&encoder_mux);
 
-  // Wake the encoder task instead of having it poll. The ISR stays short: it
-  // only counts, the task does anything expensive.
+  // Wake the encoder task and the valve task instead of having them poll. The
+  // ISR stays short: it only counts, the tasks do anything expensive.
+  BaseType_t higher_woken = pdFALSE;
   if (encoder_task_handle != NULL) {
-    BaseType_t higher_woken = pdFALSE;
-    vTaskNotifyGiveFromISR(encoder_task_handle, &higher_woken);
-    portYIELD_FROM_ISR(higher_woken);
+    BaseType_t woken = pdFALSE;
+    vTaskNotifyGiveFromISR(encoder_task_handle, &woken);
+    higher_woken |= woken;
   }
+  if (valve_task_handle != NULL) {
+    BaseType_t woken = pdFALSE;
+    vTaskNotifyGiveFromISR(valve_task_handle, &woken);
+    higher_woken |= woken;
+  }
+  portYIELD_FROM_ISR(higher_woken);
 }
 
 // Safe to call from loop(): int32_t is not atomic against a concurrent ISR on
@@ -122,6 +159,7 @@ void encoder_begin() {
 // prototype generation.
 void test_GPIO_outputs();
 void print_engine_run();
+void coils_begin();
 
 static void encoder_task(void *arg) {
   // Publish the handle before attaching, so the ISR never fires with it unset.
@@ -307,6 +345,7 @@ void setup() {
       digitalWrite(coils[i], LOW);
       log_i("COIL%d -> GPIO%u", i + 1, coils[i]);
   }
+  coils_begin();
 
   log_i("GPIO inputs:");
   for (int i = 0; i < NUM_ENCODER_CHANNELS; i++) {
@@ -335,12 +374,97 @@ void setup() {
 
 void set_coil_state(uint16_t bitVector) {
   uint16_t bit = 0x8000;  // bit 15 -> coils[0] (COIL1)
+  uint32_t bank0_set = 0, bank0_clear = 0;
+  uint32_t bank1_set = 0, bank1_clear = 0;
 
   for (int i = 0; i < NUM_COILS; i++) {
-    digitalWrite(coils[i], (bitVector & bit) ? HIGH : LOW);
+    bool on = (bitVector & bit) != 0;
+    if (coil_is_bank1[i]) {
+      if (on) bank1_set |= coil_mask[i]; else bank1_clear |= coil_mask[i];
+    } else {
+      if (on) bank0_set |= coil_mask[i]; else bank0_clear |= coil_mask[i];
+    }
     bit >>= 1;
   }
+
+  // One write per bank per direction, instead of one digitalWrite() per
+  // coil, so every coil switches within the same register access rather
+  // than one at a time.
+  GPIO.out_w1ts = bank0_set;
+  GPIO.out_w1tc = bank0_clear;
+  GPIO.out1_w1ts.val = bank1_set;
+  GPIO.out1_w1tc.val = bank1_clear;
 }
+
+// --- Coil close timer -------------------------------------------------------
+//
+// A column's burst is ended by a one-shot esp_timer instead of the valve
+// task polling millis(), so the close happens when the timer fires rather
+// than up to 5 ms later on the next scan tick.
+//
+// The timer callback runs in the dedicated esp_timer task, a different
+// thread from valve_task, so its close and the task's next open can race.
+// coil_mux serializes the two set_coil_state() calls that can actually
+// collide, and coil_generation guards against a stale timer: every open (or
+// forced state change that must not be undone by an old timer) bumps the
+// generation, and coil_armed_generation records which generation the
+// currently-armed timer is allowed to close. If a new open/force happens
+// before a late callback acquires the lock, the generation it captured no
+// longer matches and it skips the close instead of stomping the newer state.
+static esp_timer_handle_t coil_off_timer = NULL;
+static portMUX_TYPE coil_mux = portMUX_INITIALIZER_UNLOCKED;
+static volatile uint32_t coil_generation = 0;
+static volatile uint32_t coil_armed_generation = 0;
+
+static void coil_off_timer_cb(void *arg) {
+  portENTER_CRITICAL(&coil_mux);
+  if (coil_armed_generation == coil_generation) {
+    set_coil_state(0x0000);
+  }
+  portEXIT_CRITICAL(&coil_mux);
+}
+
+void coil_timer_begin() {
+  esp_timer_create_args_t args = {};
+  args.callback = coil_off_timer_cb;
+  args.name = "coil_off";
+  esp_timer_create(&args, &coil_off_timer);
+}
+
+// Invalidates any in-flight close timer without changing the coils, so a
+// stale close can't land after whatever is about to force the coils to a
+// new state (priming/trace taking over mid-burst). Does not touch the
+// coils itself — the caller is expected to set them right after.
+static void coil_timer_invalidate() {
+  esp_timer_stop(coil_off_timer);  // ESP_ERR_INVALID_STATE if already idle; fine to ignore
+  portENTER_CRITICAL(&coil_mux);
+  coil_generation++;
+  portEXIT_CRITICAL(&coil_mux);
+}
+
+// True if the previous column's close hasn't fired yet, i.e. the column
+// about to open would be an overrun. Call before coil_timer_open(), which
+// closes-then-reopens regardless -- this is purely for counting/logging.
+static bool coil_timer_is_pending() {
+  return esp_timer_is_active(coil_off_timer);
+}
+
+// Opens a column's valves and arms the close timer for burst_us. No
+// logging between the coil write and the timer start, per the "no log_*
+// calls between opening and arming" rule -- a UART write here would add
+// jitter to exactly the latency this exists to kill.
+static void coil_timer_open(uint16_t bits, uint32_t burst_us) {
+  esp_timer_stop(coil_off_timer);
+  uint32_t my_gen;
+  portENTER_CRITICAL(&coil_mux);
+  coil_generation++;
+  my_gen = coil_generation;
+  set_coil_state(bits);
+  portEXIT_CRITICAL(&coil_mux);
+  coil_armed_generation = my_gen;
+  esp_timer_start_once(coil_off_timer, burst_us);
+}
+// ---------------------------------------------------------------------------
 
 // Naive test function for flipping all coils on / off
 void test_GPIO_outputs() {
@@ -374,6 +498,12 @@ void test_encoder() {
 // column 0 always lines up with wherever the wheel happens to be when that
 // text starts printing.
 void print_engine_run() {
+  // Publish before anything below can be relied on to wake promptly. The
+  // encoder ISR null-checks this independently of encoder_task_handle, so
+  // publish order between the two tasks' startup doesn't matter.
+  valve_task_handle = xTaskGetCurrentTaskHandle();
+  coil_timer_begin();
+
   String current = "";
   int32_t last_column = -1;
 
@@ -381,12 +511,6 @@ void print_engine_run() {
   // Tracked as a flag rather than by comparing strings, so a user who
   // queues the same text still gets it printed once and advanced past.
   bool looping_default = false;
-
-  // Coils fire a brief burst when the scan lands on a column, rather than
-  // staying on until the scan reaches the next one. coil_off_at_ms is when
-  // the current burst should end.
-  bool coil_on = false;
-  uint32_t coil_off_at_ms = 0;
 
   // See encoder_task()'s LOG_INTERVAL_MS comment: a fast spin can change
   // columns faster than a UART write drains, so cap how often we log a
@@ -403,12 +527,40 @@ void print_engine_run() {
   // wherever the wheel ended up.
   bool resync_column = false;
 
+  // Column-period measurement for the speed-adaptive burst (Ticket 2): EMA of
+  // the time between column changes, so a single jittery encoder interval
+  // doesn't swing the computed burst. period_valid is false until a real
+  // sample exists; until then the burst computation falls back to the max
+  // burst. have_last_change_us additionally gates the very first delta after
+  // a reset, so that delta (spanning whatever happened before the reset) is
+  // discarded as the gap itself rather than mistaken for a real sample.
+  const float PERIOD_EMA_ALPHA = 0.3f;
+  const uint32_t PERIOD_RESET_GAP_US = 500000;  // bike stopped
+  bool have_last_change_us = false;
+  uint32_t last_column_change_us = 0;
+  float smoothed_period_us = 0;
+  bool period_valid = false;
+  auto reset_period_estimate = [&]() {
+    period_valid = false;
+    have_last_change_us = false;
+  };
+
+  // Diagnostic only (Ticket 2.4): counts columns where the previous burst's
+  // timer was still running when a new one arrived (sudden acceleration).
+  // Doesn't persist across reboots.
+  uint32_t overrun_count = 0;
+
   while (true) {
     if (priming_is_active()) {
       // Manual override: hold every valve open regardless of scan state
       // until the web UI's "priming finished" clears this.
+      if (!was_priming) {
+        // Invalidate any close timer left armed from the column that was
+        // open when priming engaged, so it can't fire mid-priming and
+        // close the valves out from under this override.
+        coil_timer_invalidate();
+      }
       set_coil_state(0xFFFF);
-      coil_on = false;
       was_priming = true;
       delay(5);
       continue;
@@ -419,6 +571,7 @@ void print_engine_run() {
       // column happens to render.
       set_coil_state(0x0000);
       was_priming = false;
+      reset_period_estimate();
     }
 
     if (trace_is_active()) {
@@ -426,6 +579,11 @@ void print_engine_run() {
       // all off for the configured trace gap. Blocking is fine here since nothing else
       // runs while tracing. Log after the burst, not during, so a slow
       // UART write can't stretch the pulse being measured.
+      if (!was_tracing) {
+        // Same reasoning as priming: a timer armed by the column that was
+        // open when trace engaged must not be allowed to fire mid-trace.
+        coil_timer_invalidate();
+      }
       was_tracing = true;
       uint32_t burst_ms = params_get_column_burst_ms();
       uint32_t start_us = micros();
@@ -438,7 +596,6 @@ void print_engine_run() {
       }
       set_coil_state(0x0000);
       uint32_t elapsed_us = micros() - start_us;
-      coil_on = false;
       log_i("trace: all coils ON for %lu ms (measured %lu us)",
             (unsigned long)burst_ms, (unsigned long)elapsed_us);
 
@@ -453,9 +610,9 @@ void print_engine_run() {
     }
     if (was_tracing) {
       set_coil_state(0x0000);
-      coil_on = false;
       resync_column = true;
       was_tracing = false;
+      reset_period_estimate();
       log_i("trace: stopped, all coils closed");
     }
 
@@ -468,17 +625,16 @@ void print_engine_run() {
       current = text;
       looping_default = use_default;
       last_column = -1;
-      coil_on = false;
       // A new text starting is a deliberate print, so fire its first column.
       resync_column = false;
+      reset_period_estimate();
       encoder_zero();
       log_i("print engine: now printing \"%s\"", current.c_str());
     }
 
     if (current.length() == 0) {
       set_coil_state(0x0000);
-      coil_on = false;
-      delay(5);
+      ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(5));
       continue;
     }
 
@@ -498,9 +654,8 @@ void print_engine_run() {
     } else if (column >= total_columns) {
       log_i("print engine: done, advancing queue");
       set_coil_state(0x0000);
-      coil_on = false;
       text_queue_advance();
-      delay(5);
+      ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(5));
       continue;
     }
 
@@ -510,6 +665,26 @@ void print_engine_run() {
     }
 
     if (column != last_column) {
+      // Measure the time since the previous column change and fold it into
+      // the EMA. The first delta after a reset (have_last_change_us false,
+      // or a >500ms gap below) is discarded rather than sampled -- see
+      // reset_period_estimate()'s comment.
+      uint32_t now_us = micros();
+      uint32_t period_us = 0;
+      if (have_last_change_us) {
+        period_us = now_us - last_column_change_us;
+        if (period_us > PERIOD_RESET_GAP_US) {
+          period_valid = false;
+        } else if (!period_valid) {
+          smoothed_period_us = (float)period_us;
+          period_valid = true;
+        } else {
+          smoothed_period_us = PERIOD_EMA_ALPHA * period_us + (1.0f - PERIOD_EMA_ALPHA) * smoothed_period_us;
+        }
+      }
+      last_column_change_us = now_us;
+      have_last_change_us = true;
+
       int char_index = column / FONT_CHAR_WIDTH;
       int col_in_char = column % FONT_CHAR_WIDTH;
 
@@ -522,26 +697,45 @@ void print_engine_run() {
         bits = glyph[col_in_char];
       }
 
-      set_coil_state(bits);
-      coil_on = true;
-      coil_off_at_ms = millis() + params_get_column_burst_ms();
+      // Scale the burst to the measured column period so dots stay short and
+      // separate at speed, capped at the walking-speed default and floored
+      // at the shortest burst the valves reliably open for. min_burst_us
+      // capped at max_burst_us guards against a transient
+      // min_burst_ms > column_burst_ms (params changed mid-print); /params
+      // validation is the real guard against persisting that combination.
+      uint32_t max_burst_us = params_get_column_burst_ms() * 1000;
+      uint32_t min_burst_us = min(params_get_min_burst_ms() * 1000, max_burst_us);
+      uint32_t burst_us = max_burst_us;
+      if (period_valid) {
+        float target_us = (params_get_burst_duty_pct() / 100.0f) * smoothed_period_us;
+        burst_us = (uint32_t)min((float)max_burst_us, max((float)min_burst_us, target_us));
+      }
+      if (coil_timer_is_pending()) {
+        // Previous burst hadn't closed yet -- coil_timer_open() below stops
+        // that timer and overwrites the coil state with this column's bits
+        // before re-arming, so the merge is avoided, but count it: a
+        // non-zero rate here means bursts are outrunning the column period
+        // at the current speed/duty/min-burst settings.
+        overrun_count++;
+      }
+      coil_timer_open(bits, burst_us);
       last_column = column;
 
       uint32_t now = millis();
       if (now - last_log_ms >= LOG_INTERVAL_MS) {
-        log_i("print engine: pos=%ld col=%ld/%ld char='%c' bits=0x%04x",
-              (long)pos, (long)column, (long)total_columns, current[char_index], bits);
+        log_i("print engine: pos=%ld col=%ld/%ld char='%c' bits=0x%04x period_us=%lu burst_us=%lu overruns=%lu",
+              (long)pos, (long)column, (long)total_columns, current[char_index], bits,
+              (unsigned long)period_us, (unsigned long)burst_us, (unsigned long)overrun_count);
         last_log_ms = now;
       }
-    } else if (coil_on && (int32_t)(millis() - coil_off_at_ms) >= 0) {
-      // Wraparound-safe "has the burst timer elapsed" check: millis()
-      // overflows every ~49 days, and the signed subtraction stays correct
-      // across that wrap.
-      set_coil_state(0x0000);
-      coil_on = false;
     }
+    // Repeated scan ticks on the same column do nothing now -- the close
+    // timer armed above owns ending the burst, not this loop.
 
-    delay(5);
+    // Blocks until the encoder ISR notifies us (immediate pickup of a new
+    // column) or 5 ms elapses (fallback tick for priming/trace/queue state
+    // changes, which aren't signaled by the encoder).
+    ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(5));
   }
 }
 

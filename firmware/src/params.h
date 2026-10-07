@@ -20,11 +20,24 @@ void params_set_scale_mm_per_detent(float v);
 uint32_t params_get_clicks_per_column();
 void params_set_clicks_per_column(uint32_t v);
 
-// How long a column's coils stay energized once the scan lands on it, in
-// milliseconds. The print engine fires this as a brief burst rather than
-// holding the coils on until the scan reaches the next column.
+// Ceiling on how long a column's coils stay energized once the scan lands on
+// it, in milliseconds. The print engine fires a burst no longer than this
+// (see params_get_burst_duty_pct() for how the actual burst is scaled down at
+// speed) rather than holding the coils on until the scan reaches the next
+// column.
 uint32_t params_get_column_burst_ms();
 void params_set_column_burst_ms(uint32_t v);
+
+// Percent of the measured column period the adaptive burst targets, so dots
+// don't smear together at speed. Clamped to params_get_min_burst_ms() /
+// params_get_column_burst_ms() by the print engine.
+uint32_t params_get_burst_duty_pct();
+void params_set_burst_duty_pct(uint32_t v);
+
+// Floor on burst length, in milliseconds, below which the valves don't
+// reliably open. Must be <= params_get_column_burst_ms().
+uint32_t params_get_min_burst_ms();
+void params_set_min_burst_ms(uint32_t v);
 
 // Debug trace mode only: how long all coils stay off between bursts, in
 // milliseconds. The burst itself uses params_get_column_burst_ms().

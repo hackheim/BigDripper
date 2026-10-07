@@ -88,8 +88,12 @@ button{font-size:1.2em;padding:.5em 1.5em;margin-top:1.5em}
 <input type="number" name="maxlen" min="1" max="255" value="%MAXLEN%"></label>
 <label>Pause between prints (ms)
 <input type="number" name="pausems" min="0" value="%PAUSEMS%"></label>
-<label>Column burst duration (ms)
+<label>Max column burst (ms)
 <input type="number" name="burstms" min="0" value="%BURSTMS%"></label>
+<label>Burst duty (% of column period, 5-95)
+<input type="number" name="burstduty" min="5" max="95" value="%BURSTDUTY%"></label>
+<label>Min column burst (ms)
+<input type="number" name="minburstms" min="1" value="%MINBURSTMS%"></label>
 <label>Trace delay between bursts (ms)
 <input type="number" name="tracegapms" min="0" value="%TRACEGAPMS%"></label>
 <button type="submit">Save</button>
@@ -147,6 +151,8 @@ static void handle_params_page() {
   page.replace("%MAXLEN%", String(params_get_max_text_len()));
   page.replace("%PAUSEMS%", String(params_get_print_pause_ms()));
   page.replace("%BURSTMS%", String(params_get_column_burst_ms()));
+  page.replace("%BURSTDUTY%", String(params_get_burst_duty_pct()));
+  page.replace("%MINBURSTMS%", String(params_get_min_burst_ms()));
   page.replace("%TRACEGAPMS%", String(params_get_trace_gap_ms()));
   server.send(200, "text/html", page);
 }
@@ -174,6 +180,32 @@ static void handle_params_set() {
     long v = server.arg("burstms").toInt();
     if (v >= 0) {
       params_set_column_burst_ms((uint32_t)v);
+    }
+  }
+  // Duty and min-burst are validated together against the (possibly
+  // just-updated) max burst above, rather than independently like the fields
+  // above -- a min burst only makes sense relative to the current ceiling.
+  if (server.hasArg("burstduty") || server.hasArg("minburstms")) {
+    uint32_t max_burst_ms = params_get_column_burst_ms();
+    long duty = server.hasArg("burstduty") ? server.arg("burstduty").toInt()
+                                            : (long)params_get_burst_duty_pct();
+    long min_burst = server.hasArg("minburstms") ? server.arg("minburstms").toInt()
+                                                  : (long)params_get_min_burst_ms();
+    if (duty < 5 || duty > 95) {
+      server.send(400, "text/plain", "Burst duty must be between 5 and 95.");
+      return;
+    }
+    if (min_burst < 1 || min_burst > (long)max_burst_ms) {
+      server.send(400, "text/plain",
+                  "Min column burst must be between 1 and the max column burst (" +
+                      String(max_burst_ms) + " ms).");
+      return;
+    }
+    if (server.hasArg("burstduty")) {
+      params_set_burst_duty_pct((uint32_t)duty);
+    }
+    if (server.hasArg("minburstms")) {
+      params_set_min_burst_ms((uint32_t)min_burst);
     }
   }
   if (server.hasArg("tracegapms")) {

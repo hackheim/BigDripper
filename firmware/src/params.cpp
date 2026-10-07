@@ -8,6 +8,8 @@ static const uint32_t DEFAULT_PRINT_PAUSE_MS = 2000;
 static const uint32_t DEFAULT_CLICKS_PER_COLUMN = 100;
 static const uint32_t DEFAULT_COLUMN_BURST_MS = 20;
 static const uint32_t DEFAULT_TRACE_GAP_MS = 1000;
+static const uint32_t DEFAULT_BURST_DUTY_PCT = 50;
+static const uint32_t DEFAULT_MIN_BURST_MS = 4;
 
 static Preferences prefs;
 static SemaphoreHandle_t params_mutex;
@@ -18,6 +20,8 @@ static uint32_t print_pause_ms;
 static uint32_t clicks_per_column;
 static uint32_t column_burst_ms;
 static uint32_t trace_gap_ms;
+static uint32_t burst_duty_pct;
+static uint32_t min_burst_ms;
 
 void params_begin() {
   params_mutex = xSemaphoreCreateMutex();
@@ -30,6 +34,8 @@ void params_begin() {
   clicks_per_column = prefs.getUInt("clkpercol", DEFAULT_CLICKS_PER_COLUMN);
   column_burst_ms = prefs.getUInt("burstms", DEFAULT_COLUMN_BURST_MS);
   trace_gap_ms = prefs.getUInt("tracegapms", DEFAULT_TRACE_GAP_MS);
+  burst_duty_pct = prefs.getUInt("burstduty", DEFAULT_BURST_DUTY_PCT);
+  min_burst_ms = prefs.getUInt("minburstms", DEFAULT_MIN_BURST_MS);
 }
 
 float params_get_scale_mm_per_detent() {
@@ -113,5 +119,33 @@ void params_set_trace_gap_ms(uint32_t v) {
   xSemaphoreTake(params_mutex, portMAX_DELAY);
   trace_gap_ms = v;
   prefs.putUInt("tracegapms", v);
+  xSemaphoreGive(params_mutex);
+}
+
+uint32_t params_get_burst_duty_pct() {
+  xSemaphoreTake(params_mutex, portMAX_DELAY);
+  uint32_t v = burst_duty_pct;
+  xSemaphoreGive(params_mutex);
+  return v;
+}
+
+void params_set_burst_duty_pct(uint32_t v) {
+  xSemaphoreTake(params_mutex, portMAX_DELAY);
+  burst_duty_pct = v;
+  prefs.putUInt("burstduty", v);
+  xSemaphoreGive(params_mutex);
+}
+
+uint32_t params_get_min_burst_ms() {
+  xSemaphoreTake(params_mutex, portMAX_DELAY);
+  uint32_t v = min_burst_ms;
+  xSemaphoreGive(params_mutex);
+  return v;
+}
+
+void params_set_min_burst_ms(uint32_t v) {
+  xSemaphoreTake(params_mutex, portMAX_DELAY);
+  min_burst_ms = v;
+  prefs.putUInt("minburstms", v);
   xSemaphoreGive(params_mutex);
 }
