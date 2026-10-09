@@ -42,6 +42,7 @@ body{font-family:sans-serif;margin:0;background:#fff;color:#111;font-size:17px}
 font-size:1em;font-weight:bold;line-height:1.2;padding:4px 0;background:#c0392b}
 #bar button[aria-pressed=true]{background:#1e8e3e}
 #bar small{display:block;font-size:.7em;font-weight:normal}
+#dry{display:none;background:#c0392b;color:#fff;text-align:center;padding:.4em;font-size:.9em;font-weight:bold}
 #offline{display:none;background:#f1c40f;color:#111;text-align:center;padding:.4em;font-size:.9em}
 main{max-width:480px;margin:0 auto;padding:0 16px 2em}
 h2{font-size:1em;margin:1.4em 0 .4em;color:#555}
@@ -80,6 +81,7 @@ border:2px solid #2c3e91;background:#fff;color:#2c3e91}
 <button data-m="lines">Lines<small>OFF</small></button>
 <button data-m="text">Text<small>OFF</small></button>
 </div>
+<div id="dry">DRY RUN &mdash; valves disabled</div>
 <div id="offline">Not connected to BigDripper</div>
 <main>
 <form id="lines">
@@ -130,6 +132,7 @@ function draw(s){
     b.querySelector('small').textContent=on?'ON':'OFF';
   });
   $('lines').style.display=s.mode=='lines'?'block':'none';
+  $('dry').style.display=s.dry_run?'block':'none';
   if(document.activeElement!=$('spacing'))$('spacing').value=s.lines_spacing;
   var c=$('cur');c.textContent='';
   if(s.mode=='off')c.appendChild(el('span','empty','(nothing — all modes off)'));
@@ -326,7 +329,12 @@ static String status_json() {
     if (i) json += ',';
     json += message_json(pending[i]);
   }
-  json += "],\"lines_spacing\":" + String(params_get_test_line_spacing()) + "}";
+  json += "],\"lines_spacing\":" + String(params_get_test_line_spacing());
+#ifdef CONSOLE_PREVIEW_DRY_RUN
+  // Only in dry-run builds (Ticket 7.2), so the page can say so.
+  json += ",\"dry_run\":true";
+#endif
+  json += "}";
   return json;
 }
 

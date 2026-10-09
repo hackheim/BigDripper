@@ -8,6 +8,7 @@
 #include "text_queue.h"
 #include "mode.h"
 #include "test_pattern.h"
+#include "console_preview.h"
 
 // COIL1..COIL16 -> ESP32-S3 GPIO, in order. The state vector is MSB-first:
 // bit 15 = COIL1 (coils[0]) ... bit 0 = COIL16 (coils[15]).
@@ -361,6 +362,10 @@ void setup() {
   // as loopTask) as soon as it's created.
   params_begin();
 
+  // Before valve_task starts, since the print engine pushes to the preview
+  // queue. No-op in normal builds.
+  console_preview_begin();
+
   // 4096-byte stacks: both tasks call log_i, and the vsnprintf underneath it is
   // the stack-hungry part. Priorities are above loopTask's 1 so neither is
   // starved by it; being on separate cores makes that mostly academic.
@@ -386,6 +391,11 @@ void set_coil_state(uint16_t bitVector) {
     bit >>= 1;
   }
 
+#ifdef CONSOLE_PREVIEW_DRY_RUN
+  // Dry run (Ticket 7.2): masks computed as usual so the timing is the same,
+  // but no valve ever opens, in any mode.
+  (void)bank0_set; (void)bank0_clear; (void)bank1_set; (void)bank1_clear;
+#else
   // One write per bank per direction, instead of one digitalWrite() per
   // coil, so every coil switches within the same register access rather
   // than one at a time.
@@ -393,6 +403,7 @@ void set_coil_state(uint16_t bitVector) {
   GPIO.out_w1tc = bank0_clear;
   GPIO.out1_w1ts.val = bank1_set;
   GPIO.out1_w1tc.val = bank1_clear;
+#endif
 }
 
 // --- Coil close timer -------------------------------------------------------
@@ -619,6 +630,7 @@ void print_engine_run() {
           break;
       }
       prev_mode = mode;
+      console_preview_mode(mode);
     }
 
     if (mode == PrintMode::Off) {
@@ -692,6 +704,9 @@ void print_engine_run() {
         encoder_zero();
         log_i("print engine: now printing \"%s\" in %s%s", current.text.c_str(),
               font_label(current.font), current.invert ? ", inverted" : "");
+        if (current.text.length() > 0) {
+          console_preview_message(current, looping_default);
+        }
       }
 
       if (current_columns.empty()) {
@@ -784,6 +799,22 @@ void print_engine_run() {
         overrun_count++;
       }
       coil_timer_open(bits, burst_us);
+
+      // Only after the timer is armed (see coil_timer_open()). Columns the
+      // encoder jumped over never fire, so the preview says so instead of
+      // silently squashing the picture. last_column is -1 right after a
+      // reset, where nothing was skipped.
+      if (last_column >= 0) {
+        int32_t jump = abs(column - last_column);
+        if (looping_default) {
+          // The default text wraps, so last -> 0 is one column, not a jump.
+          jump = min(jump, total_columns - jump);
+        }
+        if (jump > 1) {
+          console_preview_skipped(jump - 1);
+        }
+      }
+      console_preview_column(bits);
       last_column = column;
 
       uint32_t now = millis();

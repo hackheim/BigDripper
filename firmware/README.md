@@ -28,6 +28,42 @@ The Drip glyphs are defined in `font_design/gen_font.py`, and the Spleen font's 
 
     sh font_design/host_test/run.sh
 
+## Console preview
+
+Check what the head prints at the bench, without water. Two extra build environments draw every column that fires on the serial console as one line of text; turn the wheel and the message scrolls by column by column.
+
+    pio run -e preview -t upload -t monitor        # preview, valves fire as normal
+    pio run -e preview-dry -t upload -t monitor    # preview, valves never open (dry run)
+
+Add `--upload-port` / `--monitor-port` if the CP2102 isn't at the port in `platformio.ini`. On Linux it's usually `/dev/ttyUSB*` (e.g. `--upload-port /dev/ttyUSB1`), or watch it with `pio device monitor -p /dev/ttyUSB1 -b 115200`. If `pio` isn't on your PATH, it's `~/.platformio/penv/bin/pio`. A plain `pio run` still builds only the normal firmware. **Flash the normal firmware (`pio run -t upload`) again before riding**: a dry-run board prints `*** DRY RUN: valves disabled ***` at boot and its web page shows a red "DRY RUN — valves disabled" line.
+
+The preview is on the CP2102 port ("UART", the one used for flashing; `Serial0` in the code), not the native USB port. If nothing shows up, check which port you're watching first.
+
+How to read it: each line is one column, 16 characters, `#` = valve open, `.` = closed, COIL1 on the left. Columns appear top to bottom in the order they fire. **Rotate the screen 90° anticlockwise** (left edge down) and the text reads the right way up, first column on the left. It shows the coil bits actually written, so if the preview reads mirrored, the ground print is mirrored too. `HI` in Drip looks like this:
+
+    -- HI [Drip] --
+    ################
+    .......##.......
+    .......##.......
+    .......##.......
+    .......##.......
+    .......##.......
+    .......##.......
+    .......##.......
+    ################
+    ................
+    ................
+    ................
+    ##............##
+    ##............##
+    ################
+    ##............##
+    ##............##
+
+Other lines: `-- mode: lines --` when the mode changes (Prime and Trace draw nothing, Lines draws its columns), `~~ skipped 3 ~~` when the wheel jumped past columns between two scans (those never fire on the ground either), and `!! dropped 12 lines` if the console fell behind a fast spin. Dropped lines only affect the preview, never the valves.
+
+Under the hood these are the build flags `-D CONSOLE_PREVIEW=1` and `-D CONSOLE_PREVIEW_DRY_RUN=1`, which also work on their own.
+
 ## Debugging
 
 1. Make sure that the CP210x driver is installed oin the machine you are debugging on. If not, the UART port will not enumerate
