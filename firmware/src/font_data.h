@@ -5,16 +5,19 @@
 // Only font.cpp should need these; everything else goes through font.h.
 
 struct FontGlyph {
-  const char *token;         // what's typed to get it: "A", "\xC3\x86" (Æ), ":-)"
+  const char *token;         // what's typed to get it: "A", "\xC3\x86" (Æ), ":smile:"
   uint8_t width;             // columns, not counting inter-glyph spacing
   const uint16_t *columns;   // left to right; bit 15 = top row ... bit 0 = bottom
 };
 
-extern const FontGlyph FONT_REGULAR[];
-extern const size_t FONT_REGULAR_COUNT;
-extern const FontGlyph FONT_BOLD[];
-extern const size_t FONT_BOLD_COUNT;
+// One table per font in font.h's Font enum.
+extern const FontGlyph FONT_SPLEEN[];
+extern const size_t FONT_SPLEEN_COUNT;
+extern const FontGlyph FONT_DRIP[];
+extern const size_t FONT_DRIP_COUNT;
+extern const FontGlyph FONT_DRIP_BOLD[];
+extern const size_t FONT_DRIP_BOLD_COUNT;
 
-// Same in every weight. Several tokens can share one drawing (":-)" and ":)").
+// Same in every font, one entry per emoji, keyed by its shortcode.
 extern const FontGlyph FONT_EMOJI[];
 extern const size_t FONT_EMOJI_COUNT;

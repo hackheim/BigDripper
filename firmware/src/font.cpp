@@ -18,6 +18,21 @@ static uint16_t to_coils(uint16_t column) {
   return out;
 }
 
+const char *font_label(Font font) {
+  switch (font) {
+    case Font::Spleen:   return "Spleen";
+    case Font::DripBold: return "Drip bold";
+    default:             return "Drip";
+  }
+}
+
+bool font_from_id(const String &id, Font *out) {
+  if (id == "spleen") { *out = Font::Spleen; return true; }
+  if (id == "drip") { *out = Font::Drip; return true; }
+  if (id == "drip_bold") { *out = Font::DripBold; return true; }
+  return false;
+}
+
 static const FontGlyph *find(const FontGlyph *table, size_t count,
                              const char *token, size_t len) {
   for (size_t i = 0; i < count; i++) {
@@ -28,8 +43,7 @@ static const FontGlyph *find(const FontGlyph *table, size_t count,
   return nullptr;
 }
 
-// Longest emoji token starting at `s`, ignoring case, or nullptr. Longest
-// so ":-)" wins over a hypothetical ":-" and the nose-less ":)" both work.
+// Longest emoji shortcode starting at `s`, ignoring case, or nullptr.
 static const FontGlyph *match_emoji(const char *s, size_t *len_out) {
   const FontGlyph *best = nullptr;
   size_t best_len = 0;
@@ -53,27 +67,27 @@ static size_t utf8_len(uint8_t lead) {
   return 1;
 }
 
-// Glyph columns before the row-to-coil mapping, i.e. bit 15 = top row.
-static std::vector<uint16_t> render_rows(const String &text) {
-  std::vector<uint16_t> out;
+// Walks `text` one printed glyph at a time, left to right, calling
+// fn(const FontGlyph *) for each. Rendering and font_glyph_count() both go
+// through here, so the length limit counts exactly what gets printed: one per
+// letter, emoji or unknown character (printed as a space).
+template <typename Fn>
+static void for_each_glyph(const String &text, Font font, Fn fn) {
   const char *s = text.c_str();
   size_t n = text.length();
-  bool bold = false;
+  const FontGlyph *table;
+  size_t count;
+  switch (font) {
+    case Font::Spleen:   table = FONT_SPLEEN;    count = FONT_SPLEEN_COUNT;    break;
+    case Font::DripBold: table = FONT_DRIP_BOLD; count = FONT_DRIP_BOLD_COUNT; break;
+    default:             table = FONT_DRIP;      count = FONT_DRIP_COUNT;      break;
+  }
 
   size_t i = 0;
   while (i < n) {
-    const FontGlyph *table = bold ? FONT_BOLD : FONT_REGULAR;
-    size_t count = bold ? FONT_BOLD_COUNT : FONT_REGULAR_COUNT;
-
     size_t len = 0;
     const FontGlyph *g = match_emoji(s + i, &len);
     if (!g) {
-      if (s[i] == '*') {
-        bold = !bold;
-        i++;
-        continue;
-      }
-
       char token[4];
       len = utf8_len((uint8_t)s[i]);
       if (i + len > n) len = n - i;
@@ -91,21 +105,35 @@ static std::vector<uint16_t> render_rows(const String &text) {
       if (!g) g = find(table, count, " ", 1);
     }
 
-    out.insert(out.end(), g->columns, g->columns + g->width);
-    out.insert(out.end(), FONT_SPACING, 0);
+    fn(g);
     i += len;
   }
+}
+
+// Glyph columns before the row-to-coil mapping, i.e. bit 15 = top row.
+static std::vector<uint16_t> render_rows(const String &text, Font font) {
+  std::vector<uint16_t> out;
+  for_each_glyph(text, font, [&](const FontGlyph *g) {
+    out.insert(out.end(), g->columns, g->columns + g->width);
+    out.insert(out.end(), FONT_SPACING, 0);
+  });
   return out;
 }
 
-std::vector<uint16_t> font_render(const String &text) {
-  std::vector<uint16_t> cols = render_rows(text);
+size_t font_glyph_count(const String &text, Font font) {
+  size_t count = 0;
+  for_each_glyph(text, font, [&](const FontGlyph *) { count++; });
+  return count;
+}
+
+std::vector<uint16_t> font_render(const String &text, Font font) {
+  std::vector<uint16_t> cols = render_rows(text, font);
   for (uint16_t &c : cols) c = to_coils(c);
   return cols;
 }
 
-void font_print_ascii(const String &text) {
-  std::vector<uint16_t> cols = render_rows(text);
+void font_print_ascii(const String &text, Font font) {
+  std::vector<uint16_t> cols = render_rows(text, font);
   String line;
   line.reserve(cols.size());
   for (int row = 0; row < FONT_HEIGHT; row++) {

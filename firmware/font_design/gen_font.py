@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
-"""Generates the BigDripper print-head font (16 rows = 16 valves) in two
-weights and writes an ASCII preview.
+"""Generates the BigDripper print-head fonts (16 rows = 16 valves) and
+writes an ASCII preview. Three fonts, named as on the web page:
+  Spleen     Spleen 8x16, the original font, from bitmaps (spleen_8x16.py)
+  Drip       generated regular weight
+  Drip bold  generated bold weight
 
 Glyphs are built from strokes instead of being hand-drawn per style, so the
 regular and bold weights stay consistent:
@@ -12,6 +15,8 @@ Usage:
   python3 gen_font.py --c ../src/font_data.cpp  tables for the firmware
 """
 import sys
+
+import spleen_8x16
 
 HEIGHT = 16
 
@@ -379,24 +384,27 @@ CHARS = (list("ABCDEFGHIJKLMNOPQRSTUVWXYZ") + list("ÆØÅ")
 # Emoji come in one style whatever the text weight. Square, so faces come
 # out round rather than squashed to letter width; strokes as in regular.
 EMOJI_WIDTH, EMOJI_V, EMOJI_H = 16, 1, 2
-# (drawing name, what you type to get it). Matching is case-insensitive.
+# (drawing name, shortcode). The shortcode is the only way to type each
+# one, Slack/Discord style, so ASCII like ":)" or "<3" in a text never turns
+# into a face by accident. Matching is case-insensitive.
 EMOJI = [
-    (':-)', [':-)', ':)']),
-    (':-(', [':-(', ':(']),
-    (':-D', [':-D', ':D']),
-    (':-|', [':-|', ':|']),
-    (':-/', [':-/', ':/']),
-    (';-)', [';-)', ';)']),
-    (':-O', [':-O', ':O']),
-    (':-P', [':-P', ':P']),
-    ('<3', ['<3']),
-    ('DROP', [':drop:']),
-    ('STAR', [':star:']),
+    (':-)', ':smile:'),
+    (':-(', ':sad:'),
+    (':-D', ':big_smile:'),
+    (':-|', ':neutral:'),
+    (':-/', ':confused:'),
+    (';-)', ':wink:'),
+    (':-O', ':surprised:'),
+    (':-P', ':tongue:'),
+    ('<3', ':heart:'),
+    ('DROP', ':drop:'),
+    ('STAR', ':star:'),
 ]
 
+# (C table name, label on the web page, description, width, V, H)
 STYLES = [
-    ("REGULAR", "verticals 1 wide, horizontals 2 tall", 9, 1, 2),
-    ("BOLD",    "verticals 2 wide, horizontals 3 tall", 10, 2, 3),
+    ("FONT_DRIP",      "DRIP",      "verticals 1 wide, horizontals 2 tall", 9, 1, 2),
+    ("FONT_DRIP_BOLD", "DRIP BOLD", "verticals 2 wide, horizontals 3 tall", 10, 2, 3),
 ]
 
 PER_LINE = 8
@@ -423,18 +431,28 @@ def render_section(out, title, glyphs, per_line):
 
 
 def emoji_glyphs():
-    return [(name, tokens, draw(name, Glyph(EMOJI_WIDTH, EMOJI_V, EMOJI_H)).px)
-            for name, tokens in EMOJI]
+    return [(name, code, draw(name, Glyph(EMOJI_WIDTH, EMOJI_V, EMOJI_H)).px)
+            for name, code in EMOJI]
+
+
+def spleen_glyphs():
+    """[(char, px)] for the Spleen font, in spleen_8x16.py's order."""
+    W = spleen_8x16.WIDTH
+    return [(ch, [[bool(row & (0x80 >> x)) for x in range(W)] for row in rows])
+            for ch, rows in spleen_8x16.GLYPHS.items()]
 
 
 def render():
     out = []
-    for name, desc, w, v, h in STYLES:
-        render_section(out, f"{name} ({desc}; {w} columns x {HEIGHT} rows)",
+    render_section(out, f"SPLEEN (Spleen 8x16; {spleen_8x16.WIDTH} columns x {HEIGHT} rows, "
+                        "A-Z 0-9 and space only)",
+                   spleen_glyphs(), PER_LINE)
+    for _, label, desc, w, v, h in STYLES:
+        render_section(out, f"{label} ({desc}; {w} columns x {HEIGHT} rows)",
                        [(ch, draw(ch, Glyph(w, v, h)).px) for ch in CHARS],
                        PER_LINE)
     render_section(out, f"EMOJI (same in every weight; {EMOJI_WIDTH} columns x {HEIGHT} rows)",
-                   [(" ".join(tokens), px) for _, tokens, px in emoji_glyphs()],
+                   [(code, px) for _, code, px in emoji_glyphs()],
                    EMOJI_PER_LINE)
     return "\n".join(out)
 
@@ -495,12 +513,14 @@ def render_c():
         '#include "font_data.h"',
         "",
     ]
-    for name, desc, w, v, h in STYLES:
-        c_table(lines, f"FONT_{name}",
+    c_table(lines, "FONT_SPLEEN",
+            [("space" if ch == ' ' else ch, [ch], px) for ch, px in spleen_glyphs()])
+    for ident, _, desc, w, v, h in STYLES:
+        c_table(lines, ident,
                 [("space" if ch == ' ' else ch, [ch],
                   draw(ch, Glyph(w, v, h)).px) for ch in CHARS])
     c_table(lines, "FONT_EMOJI",
-            [(name, tokens, px) for name, tokens, px in emoji_glyphs()])
+            [(code, [code], px) for _, code, px in emoji_glyphs()])
     return "\n".join(lines)
 
 

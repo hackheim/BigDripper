@@ -6,8 +6,7 @@
 #include "params.h"
 #include "font.h"
 #include "text_queue.h"
-#include "priming.h"
-#include "trace.h"
+#include "mode.h"
 #include "test_pattern.h"
 
 // COIL1..COIL16 -> ESP32-S3 GPIO, in order. The state vector is MSB-first:
@@ -504,7 +503,7 @@ void print_engine_run() {
   valve_task_handle = xTaskGetCurrentTaskHandle();
   coil_timer_begin();
 
-  String current = "";
+  QueuedText current = {String(""), TEXT_QUEUE_DEFAULT_FONT};
   // `current` rendered to coil states, one per column, spacing included.
   // Rendered once when the text becomes current rather than per column.
   std::vector<uint16_t> current_columns;
@@ -521,9 +520,10 @@ void print_engine_run() {
   const uint32_t LOG_INTERVAL_MS = 50;
   uint32_t last_log_ms = 0;
 
-  bool was_priming = false;
-  bool was_tracing = false;
-  bool was_testing = false;
+  // Mode as of the previous loop iteration, for the transition side-effects
+  // below. Starts equal to mode_get()'s boot value so booting into Text
+  // doesn't count as "entering Text".
+  PrintMode prev_mode = PrintMode::Text;
 
   // Set when leaving trace mode: the next column the scan reports is taken
   // as the new baseline instead of being fired, so stopping trace leaves
@@ -555,47 +555,98 @@ void print_engine_run() {
   uint32_t overrun_count = 0;
 
   while (true) {
-    if (priming_is_active()) {
-      // Manual override: hold every valve open regardless of scan state
-      // until the web UI's "priming finished" clears this.
-      if (!was_priming) {
-        // Invalidate any close timer left armed from the column that was
-        // open when priming engaged, so it can't fire mid-priming and
-        // close the valves out from under this override.
-        coil_timer_invalidate();
+    // Read once and used for the whole iteration, so a change from the web
+    // task mid-iteration can't run half of one mode and half of another.
+    PrintMode mode = mode_get();
+    bool entering_text = false;
+
+    if (mode != prev_mode) {
+      switch (prev_mode) {
+        case PrintMode::Prime:
+          // Close everything rather than falling through to whatever bits
+          // the next mode happens to start with.
+          set_coil_state(0x0000);
+          reset_period_estimate();
+          break;
+        case PrintMode::Trace:
+          set_coil_state(0x0000);
+          resync_column = true;
+          reset_period_estimate();
+          log_i("trace: stopped, all coils closed");
+          break;
+        case PrintMode::Lines:
+          encoder_zero();
+          resync_column = true;
+          reset_period_estimate();
+          log_i("test pattern: stopped");
+          break;
+        default:
+          break;
       }
+
+      switch (mode) {
+        case PrintMode::Off:
+          // Invalidate first so a close timer left armed by the last column
+          // can't fire into whatever mode comes next.
+          coil_timer_invalidate();
+          set_coil_state(0x0000);
+          log_i("mode: off, all coils closed");
+          break;
+        case PrintMode::Prime:
+        case PrintMode::Trace:
+          // A timer armed by the column that was open when priming/trace
+          // engaged must not fire mid-mode and close the valves out from
+          // under it.
+          coil_timer_invalidate();
+          break;
+        case PrintMode::Lines:
+          // Restart the scan from column 0 without firing that column, so
+          // switching modes while standing still doesn't spray a line --
+          // the first burst waits for the wheel to move.
+          encoder_zero();
+          resync_column = true;
+          reset_period_estimate();
+          log_i("test pattern: started");
+          break;
+        case PrintMode::Text:
+          // Same for text: restart the current text from its beginning, and
+          // don't fire until the wheel moves.
+          entering_text = true;
+          encoder_zero();
+          resync_column = true;
+          reset_period_estimate();
+          last_column = -1;
+          break;
+      }
+      prev_mode = mode;
+    }
+
+    if (mode == PrintMode::Off) {
+      // Nothing prints: valves stay closed (done on entry above) and the
+      // text queue isn't read or advanced, so Text resumes the same message.
+      ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(5));
+      continue;
+    }
+
+    if (mode == PrintMode::Prime) {
+      // Manual override: hold every valve open regardless of scan state.
       set_coil_state(0xFFFF);
-      was_priming = true;
       delay(5);
       continue;
     }
-    if (was_priming) {
-      // Just came out of priming: close everything before resuming the
-      // scan, rather than falling through to whatever bits the current
-      // column happens to render.
-      set_coil_state(0x0000);
-      was_priming = false;
-      reset_period_estimate();
-    }
 
-    if (trace_is_active()) {
+    if (mode == PrintMode::Trace) {
       // Debug pulse: all coils on for exactly the configured burst, then
       // all off for the configured trace gap. Blocking is fine here since nothing else
       // runs while tracing. Log after the burst, not during, so a slow
       // UART write can't stretch the pulse being measured.
-      if (!was_tracing) {
-        // Same reasoning as priming: a timer armed by the column that was
-        // open when trace engaged must not be allowed to fire mid-trace.
-        coil_timer_invalidate();
-      }
-      was_tracing = true;
       uint32_t burst_ms = params_get_column_burst_ms();
       uint32_t start_us = micros();
       set_coil_state(0xFFFF);
-      // Poll rather than delay(burst_ms) so "trace off" closes the valves
-      // immediately even in the middle of a long burst.
+      // Poll rather than delay(burst_ms) so any mode change closes the
+      // valves immediately even in the middle of a long burst.
       uint32_t burst_start = millis();
-      while (millis() - burst_start < burst_ms && trace_is_active() && !priming_is_active()) {
+      while (millis() - burst_start < burst_ms && mode_get() == PrintMode::Trace) {
         delay(1);
       }
       set_coil_state(0x0000);
@@ -603,63 +654,53 @@ void print_engine_run() {
       log_i("trace: all coils ON for %lu ms (measured %lu us)",
             (unsigned long)burst_ms, (unsigned long)elapsed_us);
 
-      // Off period, polled in small steps so "trace off" and priming take
-      // effect promptly instead of after the full gap.
+      // Off period, polled in small steps so a mode change takes effect
+      // promptly instead of after the full gap.
       uint32_t gap_ms = params_get_trace_gap_ms();
       uint32_t off_start = millis();
-      while (millis() - off_start < gap_ms && trace_is_active() && !priming_is_active()) {
+      while (millis() - off_start < gap_ms && mode_get() == PrintMode::Trace) {
         delay(5);
       }
       continue;
     }
-    if (was_tracing) {
-      set_coil_state(0x0000);
-      resync_column = true;
-      was_tracing = false;
-      reset_period_estimate();
-      log_i("trace: stopped, all coils closed");
-    }
 
     // The test pattern replaces the text as the source of each column's
     // bits, but otherwise runs through the normal per-column path below.
-    bool testing = test_pattern_is_active();
-    if (testing != was_testing) {
-      // Starting or stopping it restarts the scan from column 0 without
-      // firing that column, so pressing the button while standing still
-      // doesn't spray a line -- the first burst waits for the wheel to move.
-      // Stopping restarts the current text from its beginning.
-      was_testing = testing;
-      encoder_zero();
-      resync_column = true;
-      reset_period_estimate();
-      log_i("test pattern: %s", testing ? "started" : "stopped");
-    }
+    bool testing = mode == PrintMode::Lines;
 
     if (!testing) {
-      String text = text_queue_current();
-      bool use_default = text.length() == 0 && text_queue_is_idle();
+      QueuedText next = text_queue_current();
+      bool use_default = next.text.length() == 0 && text_queue_is_idle();
       if (use_default) {
-        text = TEXT_QUEUE_DEFAULT_TEXT;
+        next = {String(TEXT_QUEUE_DEFAULT_TEXT), TEXT_QUEUE_DEFAULT_FONT};
       }
-      if (text != current || use_default != looping_default) {
-        current = text;
-        current_columns = font_render(current);
+      // Font compared too, so the same text queued again in another font
+      // right after itself still re-renders.
+      if (next.text != current.text || next.font != current.font ||
+          use_default != looping_default) {
+        current = next;
+        current_columns = font_render(current.text, current.font);
         looping_default = use_default;
         last_column = -1;
-        // A new text starting is a deliberate print, so fire its first column.
-        resync_column = false;
+        // A new text starting is a deliberate print, so fire its first
+        // column -- unless we only got here by switching into Text, which
+        // waits for the wheel like any other mode switch.
+        if (!entering_text) {
+          resync_column = false;
+        }
         reset_period_estimate();
         encoder_zero();
-        log_i("print engine: now printing \"%s\"", current.c_str());
+        log_i("print engine: now printing \"%s\" in %s", current.text.c_str(), font_label(current.font));
       }
 
       if (current_columns.empty()) {
         set_coil_state(0x0000);
-        if (current.length() > 0 && !looping_default) {
-          // Queued text with nothing printable in it (e.g. just "**"). The
+        if (current.text.length() > 0 && !looping_default) {
+          // Queued text with nothing printable in it. text_queue_push()
+          // rejects those, so this is only a backstop. The
           // scan below would never reach its end, so skip it rather than
           // stalling the queue.
-          log_i("print engine: nothing to print in \"%s\", skipping", current.c_str());
+          log_i("print engine: nothing to print in \"%s\", skipping", current.text.c_str());
           text_queue_advance();
         }
         ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(5));
