@@ -29,7 +29,10 @@ class Glyph:
         self.M = (HEIGHT - h) // 2      # middle bar row
         self.R = w - v                  # right stem column
         self.C = (w - v) // 2           # centred stem column
-        self.c = v                      # corner chamfer size
+        self.c = v                      # notch size where bowls meet
+        # Corner radii for cut(): big enough that round letters (O) read
+        # differently from square-cornered ones (D, B).
+        self.rx, self.ry = (3, 4) if v == 1 else (4, 5)
         self.px = [[False] * w for _ in range(HEIGHT)]
 
     def _set(self, x, y, on=True):
@@ -79,17 +82,26 @@ class Glyph:
                     self._set(self.W - 1 - x, y)
 
     def cut(self, corner, x=None, y=None):
-        """Rounds a corner by clearing a triangle of size c. corner is
-        tl/tr/bl/br; x, y default to the glyph's own corner."""
+        """Rounds a corner into a quarter ellipse of radii rx, ry. corner is
+        tl/tr/bl/br; x, y default to the glyph's own corner. Clears what
+        lies outside the outer arc and fills the band between it and an
+        inner arc V columns / H rows in, so the curve keeps the stroke
+        weights. Pixels inside the inner arc are left alone, so a stroke
+        crossing the corner's box survives."""
         sx = 1 if corner[1] == 'l' else -1
         sy = 1 if corner[0] == 't' else -1
         if x is None:
             x = 0 if sx == 1 else self.W - 1
         if y is None:
             y = 0 if sy == 1 else HEIGHT - 1
-        for i in range(self.c):
-            for j in range(self.c - i):
-                self._set(x + sx * i, y + sy * j, False)
+        rx, ry = self.rx, self.ry
+        for i in range(int(rx + 0.5)):
+            for j in range(int(ry + 0.5)):
+                px, py = rx - (i + 0.5), ry - (j + 0.5)  # from arc centre
+                if (px / rx) ** 2 + (py / ry) ** 2 > 1:
+                    self._set(x + sx * i, y + sy * j, False)
+                elif (px / (rx - self.V)) ** 2 + (py / (ry - self.H)) ** 2 >= 1:
+                    self._set(x + sx * i, y + sy * j)
 
     def dot(self, x, y):
         """Punctuation dot: 2V wide, H tall."""
@@ -180,7 +192,9 @@ def draw(ch, g):
         g.v(0); g.h(T); g.h(M); g.v(R, 0, M + H - 1)
         g.cut('tr'); g.cut('br', W - 1, M + H - 1)
     elif ch == 'Q':
-        draw('O', g); g.line(C, 10, R, last)
+        # Square bottom-right corner: the tail runs out through it.
+        g.v(0); g.v(R); g.h(T); g.h(B); g.line(C, 10, R, last)
+        g.cut('tl'); g.cut('tr'); g.cut('bl')
     elif ch == 'R':
         draw('P', g); g.line(C, M + H, R, last)
     elif ch == 'S':
@@ -239,6 +253,7 @@ def draw(ch, g):
         g.cut('tl')
     elif ch == 'Ø':
         draw('O', g); g.line(R, 0, 0, last)
+        g.cut('tr'); g.cut('bl')   # trims the slash's ends to the curve
     elif ch == 'Å':
         # No room above a 16-row cap, so the A body is shortened to make
         # space for the ring.
@@ -403,8 +418,8 @@ EMOJI = [
 
 # (C table name, label on the web page, description, width, V, H)
 STYLES = [
-    ("FONT_DRIP",      "DRIP",      "verticals 1 wide, horizontals 2 tall", 9, 1, 2),
-    ("FONT_DRIP_BOLD", "DRIP BOLD", "verticals 2 wide, horizontals 3 tall", 10, 2, 3),
+    ("FONT_DRIP",      "DRIP",      "verticals 1 wide, horizontals 2 tall", 7, 1, 2),
+    ("FONT_DRIP_BOLD", "DRIP BOLD", "verticals 2 wide, horizontals 3 tall", 8, 2, 3),
 ]
 
 PER_LINE = 8
