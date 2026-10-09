@@ -65,7 +65,7 @@ border:2px solid #2c3e91;background:#fff;color:#2c3e91}
 #fonts button:last-child{border-radius:0 6px 6px 0}
 #fontrow button[aria-pressed=true]{background:#2c3e91;color:#fff}
 #invert{flex:1;border-radius:6px}
-#invert:disabled{border-color:#bbb;color:#999}
+#text.inv{background:#111;color:#fff}
 #text.bold{font-weight:bold}
 .font{color:#888;font-weight:normal}
 #left{font-size:.9em;color:#555;margin:.3em 0}
@@ -102,9 +102,10 @@ border:2px solid #2c3e91;background:#fff;color:#2c3e91}
 <button type="button" data-f="drip">Drip</button>
 <button type="button" data-f="drip_bold">Drip bold</button>
 </div>
-<button type="button" id="invert" aria-pressed="false" disabled title="Invert: coming soon">Invert</button>
+<button type="button" id="invert" aria-pressed="false" title="Print dry letters in a sprayed band">Invert</button>
 </div>
 <input type="hidden" id="font" name="font" value="drip">
+<input type="hidden" id="inv" name="invert" value="0">
 <input type="text" id="text" name="text" placeholder="Text to print" autocomplete="off">
 <p id="left"></p>
 <div id="emoji"></div>
@@ -136,12 +137,13 @@ function draw(s){
   else if(s.mode=='trace')c.appendChild(el('span','empty','(trace — pulsing all valves)'));
   else if(s.mode=='lines')c.appendChild(el('span','empty','(vertical line every '+s.lines_spacing+' columns)'));
   else if(s.paused)c.appendChild(el('span','empty','(pause)'));
-  else{c.textContent=s.current.text;c.appendChild(el('span','font',' \u00b7 '+s.current.font));
+  else{c.textContent=s.current.text;c.appendChild(el('span','font',label(s.current)));
     if(s.default)c.appendChild(el('span','empty',' (default, on repeat)'))}
   var p=$('pend');p.textContent='';
   if(!s.pending.length)p.appendChild(el('p','empty','(nothing queued)'));
-  else{var ol=document.createElement('ol');s.pending.forEach(function(m){var li=el('li','',m.text);li.appendChild(el('span','font',' \u00b7 '+m.font));ol.appendChild(li)});p.appendChild(ol)}
+  else{var ol=document.createElement('ol');s.pending.forEach(function(m){var li=el('li','',m.text);li.appendChild(el('span','font',label(m)));ol.appendChild(li)});p.appendChild(ol)}
 }
+function label(m){return ' \u00b7 '+m.font+(m.invert?' \u00b7 inverted':'')}
 function online(ok){$('offline').style.display=ok?'none':'block'}
 function req(url,body){
   return fetch(url,body?{method:'POST',body:new URLSearchParams(body)}:{cache:'no-store'})
@@ -206,19 +208,31 @@ function emojiButton(e){
   b.onclick=function(){insert(e.code)};
   return b;
 }
-// Font selector, remembered on this phone. Storage can throw (private
-// mode, blocked site data); the page then just starts at Drip each time.
+// Font selector and Invert toggle, remembered on this phone. Storage can throw (private
+// mode, blocked site data); the page then just starts at Drip, not
+// inverted, each time.
 var fbtns=document.querySelectorAll('#fonts button');
+function style(){
+  txt.className=($('font').value=='drip_bold'?'bold ':'')+($('inv').value=='1'?'inv':'');
+}
 function pickFont(f){
   fbtns.forEach(function(b){b.setAttribute('aria-pressed',b.dataset.f==f)});
-  $('font').value=f;
-  txt.className=f=='drip_bold'?'bold':'';
+  $('font').value=f;style();
   try{localStorage.setItem('font',f)}catch(e){}
 }
+function setInvert(on){
+  $('invert').setAttribute('aria-pressed',on);
+  $('inv').value=on?'1':'0';style();
+  try{localStorage.setItem('invert',on?'1':'0')}catch(e){}
+}
+$('invert').onclick=function(){setInvert($('inv').value!='1')};
 fbtns.forEach(function(b){b.onclick=function(){pickFont(b.dataset.f)}});
 var saved=null;
 try{saved=localStorage.getItem('font')}catch(e){}
 pickFont(['spleen','drip','drip_bold'].indexOf(saved)>=0?saved:'drip');
+saved=null;
+try{saved=localStorage.getItem('invert')}catch(e){}
+setInvert(saved=='1');
 fetch('/emoji.json').then(function(r){return r.json()}).then(function(list){
   list.forEach(function(e){CODES.push(e.code.toLowerCase());$('emoji').appendChild(emojiButton(e))});
   count();
@@ -282,9 +296,10 @@ static String json_escape(const String &s) {
   return out;
 }
 
-// {"text":...,"font":"Drip bold"} for one message.
-static String message_json(const String &text, Font font) {
-  return "{\"text\":" + json_escape(text) + ",\"font\":" + json_escape(font_label(font)) + "}";
+// {"text":...,"font":"Drip bold","invert":false} for one message.
+static String message_json(const QueuedText &m) {
+  return "{\"text\":" + json_escape(m.text) + ",\"font\":" + json_escape(font_label(m.font)) +
+         ",\"invert\":" + (m.invert ? "true" : "false") + "}";
 }
 
 // What /status returns, and what /mode and /lines/spacing reply with.
@@ -294,13 +309,13 @@ static String status_json() {
   bool is_default = current.text.length() == 0 && text_queue_is_idle();
   bool paused = current.text.length() == 0 && !is_default;
   if (is_default) {
-    current = {String(TEXT_QUEUE_DEFAULT_TEXT), TEXT_QUEUE_DEFAULT_FONT};
+    current = {String(TEXT_QUEUE_DEFAULT_TEXT), TEXT_QUEUE_DEFAULT_FONT, false};
   }
 
   String json = "{\"mode\":\"";
   json += mode_name(mode_get());
   json += "\",\"current\":";
-  json += paused ? String("null") : message_json(current.text, current.font);
+  json += paused ? String("null") : message_json(current);
   json += ",\"default\":";
   json += is_default ? "true" : "false";
   json += ",\"paused\":";
@@ -309,7 +324,7 @@ static String status_json() {
   std::vector<QueuedText> pending = text_queue_pending();
   for (size_t i = 0; i < pending.size(); i++) {
     if (i) json += ',';
-    json += message_json(pending[i].text, pending[i].font);
+    json += message_json(pending[i]);
   }
   json += "],\"lines_spacing\":" + String(params_get_test_line_spacing()) + "}";
   return json;
@@ -441,8 +456,10 @@ static void handle_set() {
     // selector still works.
     Font font = Font::Drip;
     font_from_id(server.arg("font"), &font);
-    if (text_queue_push(t, font)) {
-      log_i("queued \"%s\" in %s", t.c_str(), font_label(font));
+    // Only "1" inverts; missing (e.g. an older cached page) means normal.
+    bool invert = server.arg("invert") == "1";
+    if (text_queue_push(t, font, invert)) {
+      log_i("queued \"%s\" in %s%s", t.c_str(), font_label(font), invert ? ", inverted" : "");
     } else {
       log_w("rejected \"%s\" (empty, too long, or queue full)", t.c_str());
     }

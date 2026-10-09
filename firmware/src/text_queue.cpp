@@ -17,7 +17,7 @@ static uint32_t pause_until_ms = 0;
 
 const char TEXT_QUEUE_DEFAULT_TEXT[] = " BIG DRIPPER ";
 
-bool text_queue_push(const String &text, Font font) {
+bool text_queue_push(const String &text, Font font, bool invert) {
   // Limit is in printed glyphs (font_glyph_count()), so an emoji
   // shortcode or Æ counts as one. The byte cap is only a safety net against
   // a huge POST, generous enough that it never bites before the real limit.
@@ -33,7 +33,7 @@ bool text_queue_push(const String &text, Font font) {
   xSemaphoreTake(queue_mutex, portMAX_DELAY);
   bool ok = queue.size() < TEXT_QUEUE_MAX_DEPTH;
   if (ok) {
-    queue.push_back({text, font});
+    queue.push_back({text, font, invert});
   }
   xSemaphoreGive(queue_mutex);
   return ok;
@@ -43,7 +43,7 @@ QueuedText text_queue_current() {
   xSemaphoreTake(queue_mutex, portMAX_DELAY);
   bool paused = pause_until_ms != 0 && millis() < pause_until_ms;
   QueuedText current = (!paused && !queue.empty()) ? queue.front()
-                                                   : QueuedText{String(""), TEXT_QUEUE_DEFAULT_FONT};
+                                                   : QueuedText{String(""), TEXT_QUEUE_DEFAULT_FONT, false};
   xSemaphoreGive(queue_mutex);
   return current;
 }

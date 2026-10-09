@@ -67,6 +67,20 @@ int main() {
   check(r("\xC3\x86\xC3\x98\xC3\x85!", Font::Drip) != r("    ", Font::Drip), "\xC3\x86\xC3\x98\xC3\x85! prints in Drip");
   check(r("HELLO", Font::DripBold) != r("HELLO", Font::Drip), "Drip bold differs from Drip");
 
+  // Inverted: FONT_INVERT_EDGE all-on columns, then every column of the
+  // normal rendering bit-inverted, then the edge again.
+  bool inv = true;
+  for (Font f : FONTS) {
+    for (const char *t : {"HI", "HELLO :heart:", " BIG DRIPPER "}) {
+      std::vector<uint16_t> want(FONT_INVERT_EDGE, 0xFFFF);
+      for (uint16_t c : font_render(String(t), f)) want.push_back((uint16_t)~c);
+      want.insert(want.end(), FONT_INVERT_EDGE, 0xFFFF);
+      inv = inv && font_render(String(t), f, true) == want;
+    }
+  }
+  check(inv, "invert = edges + bitwise inverse in every font");
+  check(font_render(String("HI"), Font::Drip, false) == r("HI"), "invert off is unchanged");
+
   Font f = Font::Drip;
   check(font_from_id("spleen", &f) && f == Font::Spleen && font_from_id("drip_bold", &f) && f == Font::DripBold &&
             font_from_id("drip", &f) && f == Font::Drip && !font_from_id("bogus", &f) && f == Font::Drip,

@@ -126,9 +126,16 @@ size_t font_glyph_count(const String &text, Font font) {
   return count;
 }
 
-std::vector<uint16_t> font_render(const String &text, Font font) {
+std::vector<uint16_t> font_render(const String &text, Font font, bool invert) {
   std::vector<uint16_t> cols = render_rows(text, font);
   for (uint16_t &c : cols) c = to_coils(c);
+  if (invert) {
+    // to_coils() only permutes bits, so inverting after it is the same as
+    // inverting the glyph.
+    for (uint16_t &c : cols) c = ~c;
+    cols.insert(cols.begin(), FONT_INVERT_EDGE, 0xFFFF);
+    cols.insert(cols.end(), FONT_INVERT_EDGE, 0xFFFF);
+  }
   return cols;
 }
 

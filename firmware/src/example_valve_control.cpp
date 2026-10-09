@@ -503,7 +503,7 @@ void print_engine_run() {
   valve_task_handle = xTaskGetCurrentTaskHandle();
   coil_timer_begin();
 
-  QueuedText current = {String(""), TEXT_QUEUE_DEFAULT_FONT};
+  QueuedText current = {String(""), TEXT_QUEUE_DEFAULT_FONT, false};
   // `current` rendered to coil states, one per column, spacing included.
   // Rendered once when the text becomes current rather than per column.
   std::vector<uint16_t> current_columns;
@@ -672,14 +672,14 @@ void print_engine_run() {
       QueuedText next = text_queue_current();
       bool use_default = next.text.length() == 0 && text_queue_is_idle();
       if (use_default) {
-        next = {String(TEXT_QUEUE_DEFAULT_TEXT), TEXT_QUEUE_DEFAULT_FONT};
+        next = {String(TEXT_QUEUE_DEFAULT_TEXT), TEXT_QUEUE_DEFAULT_FONT, false};
       }
-      // Font compared too, so the same text queued again in another font
-      // right after itself still re-renders.
+      // Font and invert compared too, so the same text queued again in
+      // another font or inverted right after itself still re-renders.
       if (next.text != current.text || next.font != current.font ||
-          use_default != looping_default) {
+          next.invert != current.invert || use_default != looping_default) {
         current = next;
-        current_columns = font_render(current.text, current.font);
+        current_columns = font_render(current.text, current.font, current.invert);
         looping_default = use_default;
         last_column = -1;
         // A new text starting is a deliberate print, so fire its first
@@ -690,7 +690,8 @@ void print_engine_run() {
         }
         reset_period_estimate();
         encoder_zero();
-        log_i("print engine: now printing \"%s\" in %s", current.text.c_str(), font_label(current.font));
+        log_i("print engine: now printing \"%s\" in %s%s", current.text.c_str(),
+              font_label(current.font), current.invert ? ", inverted" : "");
       }
 
       if (current_columns.empty()) {

@@ -15,7 +15,7 @@ This code contains logic for controlling 16 valves and also reading input from a
 1. Connect to the BigDripper SSID and enter the password "dripdrip1"
 1. Go to http://bigdripper.local (fallback http://192.168.4.1) to queue text to print
 1. Go to http://bigdripper.local/params for scaling/length/pause settings (user "admin", password "letmeprint9")
-1. Each message prints in the font picked above the text box: Spleen (the original Spleen 8x16 font), Drip or Drip bold. Drip and Drip bold have A-Z, ÆØÅ, 0-9 and `. , ! ? - : '`; Spleen only has A-Z, 0-9 and space. Anything a font doesn't have prints as a space. Emoji are written as shortcodes (the web page has a button for each): `:smile:` `:sad:` `:big_smile:` `:neutral:` `:confused:` `:wink:` `:surprised:` `:tongue:` `:heart:` `:drop:` `:star:`. The length limit counts printed characters, so an emoji counts as one.
+1. Each message prints in the font picked above the text box: Spleen (the original Spleen 8x16 font), Drip or Drip bold. Drip and Drip bold have A-Z, ÆØÅ, 0-9 and `. , ! ? - : '`; Spleen only has A-Z, 0-9 and space. Anything a font doesn't have prints as a space. The Invert button next to the fonts prints the message inverted: dry letters in a sprayed band, with 2 solid columns on each side. This uses a lot more water than normal text. Emoji are written as shortcodes (the web page has a button for each): `:smile:` `:sad:` `:big_smile:` `:neutral:` `:confused:` `:wink:` `:surprised:` `:tongue:` `:heart:` `:drop:` `:star:`. The length limit counts printed characters, so an emoji counts as one.
 
 ## Font
 

@@ -34,10 +34,19 @@ const int FONT_HEIGHT = 16;
 // Blank columns printed after every glyph.
 const int FONT_SPACING = 1;
 
+// All-on columns added before and after an inverted text. Without them a
+// glyph whose outer column has ink would leave that edge dry next to dry
+// ground, and the text would have no visible start or end.
+const int FONT_INVERT_EDGE = 2;
+
 // Renders `text` into the columns to print, left to right, spacing
 // included. Each value is fed straight into set_coil_state() (bit 15 =
 // COIL1 ... bit 0 = COIL16).
-std::vector<uint16_t> font_render(const String &text, Font font);
+//
+// With `invert`, every column is bit-inverted (spacing columns included),
+// so the letters are left dry in a sprayed band, and FONT_INVERT_EDGE
+// all-on columns frame it on each side.
+std::vector<uint16_t> font_render(const String &text, Font font, bool invert = false);
 
 // How many glyphs `text` prints: one per letter, emoji or unknown
 // character (which prints as a space). This is what the max text length

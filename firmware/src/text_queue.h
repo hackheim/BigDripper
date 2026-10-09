@@ -11,17 +11,19 @@
 
 const size_t TEXT_QUEUE_MAX_DEPTH = 8;
 
-// A message and the font it was queued with; it prints in that font.
+// A message and how it was queued: it prints in that font, and inverted
+// (dry letters in a sprayed band, see font_render()) if `invert`.
 struct QueuedText {
   String text;
   Font font;
+  bool invert;
 };
 
 // Adds a text to the back of the queue. Returns false (no-op) if the text
 // prints nothing (empty, or only `*` markup), prints more than
 // params_get_max_text_len() glyphs (font_glyph_count()), or the queue is
 // already at TEXT_QUEUE_MAX_DEPTH.
-bool text_queue_push(const String &text, Font font);
+bool text_queue_push(const String &text, Font font, bool invert);
 
 // The message currently being printed, i.e. the front of the queue. Its
 // text is empty during the inter-print pause after text_queue_advance() and
@@ -33,7 +35,8 @@ QueuedText text_queue_current();
 // TEXT_QUEUE_DEFAULT_TEXT on repeat while this holds.
 bool text_queue_is_idle();
 
-// Printed on a loop, in TEXT_QUEUE_DEFAULT_FONT, whenever the queue is idle.
+// Printed on a loop, in TEXT_QUEUE_DEFAULT_FONT and never inverted, whenever
+// the queue is idle.
 extern const char TEXT_QUEUE_DEFAULT_TEXT[];
 const Font TEXT_QUEUE_DEFAULT_FONT = Font::Drip;
 
