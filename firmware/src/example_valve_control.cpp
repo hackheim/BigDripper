@@ -8,6 +8,7 @@
 #include "text_queue.h"
 #include "priming.h"
 #include "trace.h"
+#include "test_pattern.h"
 
 // COIL1..COIL16 -> ESP32-S3 GPIO, in order. The state vector is MSB-first:
 // bit 15 = COIL1 (coils[0]) ... bit 0 = COIL16 (coils[15]).
@@ -520,6 +521,7 @@ void print_engine_run() {
 
   bool was_priming = false;
   bool was_tracing = false;
+  bool was_testing = false;
 
   // Set when leaving trace mode: the next column the scan reports is taken
   // as the new baseline instead of being fired, so stopping trace leaves
@@ -616,26 +618,43 @@ void print_engine_run() {
       log_i("trace: stopped, all coils closed");
     }
 
-    String text = text_queue_current();
-    bool use_default = text.length() == 0 && text_queue_is_idle();
-    if (use_default) {
-      text = TEXT_QUEUE_DEFAULT_TEXT;
-    }
-    if (text != current || use_default != looping_default) {
-      current = text;
-      looping_default = use_default;
-      last_column = -1;
-      // A new text starting is a deliberate print, so fire its first column.
-      resync_column = false;
-      reset_period_estimate();
+    // The test pattern replaces the text as the source of each column's
+    // bits, but otherwise runs through the normal per-column path below.
+    bool testing = test_pattern_is_active();
+    if (testing != was_testing) {
+      // Starting or stopping it restarts the scan from column 0 without
+      // firing that column, so pressing the button while standing still
+      // doesn't spray a line -- the first burst waits for the wheel to move.
+      // Stopping restarts the current text from its beginning.
+      was_testing = testing;
       encoder_zero();
-      log_i("print engine: now printing \"%s\"", current.c_str());
+      resync_column = true;
+      reset_period_estimate();
+      log_i("test pattern: %s", testing ? "started" : "stopped");
     }
 
-    if (current.length() == 0) {
-      set_coil_state(0x0000);
-      ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(5));
-      continue;
+    if (!testing) {
+      String text = text_queue_current();
+      bool use_default = text.length() == 0 && text_queue_is_idle();
+      if (use_default) {
+        text = TEXT_QUEUE_DEFAULT_TEXT;
+      }
+      if (text != current || use_default != looping_default) {
+        current = text;
+        looping_default = use_default;
+        last_column = -1;
+        // A new text starting is a deliberate print, so fire its first column.
+        resync_column = false;
+        reset_period_estimate();
+        encoder_zero();
+        log_i("print engine: now printing \"%s\"", current.c_str());
+      }
+
+      if (current.length() == 0) {
+        set_coil_state(0x0000);
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(5));
+        continue;
+      }
     }
 
     int32_t clicks_per_column = (int32_t)params_get_clicks_per_column();
@@ -646,17 +665,21 @@ void print_engine_run() {
     int32_t pos = encoder_position();
     int32_t column = (pos > 0) ? (pos / clicks_per_column) : 0;
 
-    int32_t total_columns = (int32_t)current.length() * FONT_CHAR_WIDTH;
-    if (looping_default) {
-      // Wrap instead of advancing, so the default text repeats seamlessly
-      // for as long as the wheel keeps turning.
-      column %= total_columns;
-    } else if (column >= total_columns) {
-      log_i("print engine: done, advancing queue");
-      set_coil_state(0x0000);
-      text_queue_advance();
-      ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(5));
-      continue;
+    // The test pattern has no end; only text wraps or advances the queue.
+    int32_t total_columns = 0;
+    if (!testing) {
+      total_columns = (int32_t)current.length() * FONT_CHAR_WIDTH;
+      if (looping_default) {
+        // Wrap instead of advancing, so the default text repeats seamlessly
+        // for as long as the wheel keeps turning.
+        column %= total_columns;
+      } else if (column >= total_columns) {
+        log_i("print engine: done, advancing queue");
+        set_coil_state(0x0000);
+        text_queue_advance();
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(5));
+        continue;
+      }
     }
 
     if (resync_column) {
@@ -685,16 +708,22 @@ void print_engine_run() {
       last_column_change_us = now_us;
       have_last_change_us = true;
 
-      int char_index = column / FONT_CHAR_WIDTH;
-      int col_in_char = column % FONT_CHAR_WIDTH;
-
-      // col_in_char == FONT_GLYPH_WIDTH is the blank inter-character
-      // spacing column, so bits stays 0 (all coils off, no burst) for it.
       uint16_t bits = 0;
-      if (col_in_char < FONT_GLYPH_WIDTH) {
-        uint16_t glyph[FONT_GLYPH_WIDTH];
-        font_get_glyph(current[char_index], glyph);
-        bits = glyph[col_in_char];
+      char shown = '|';  // for the log line only
+      if (testing) {
+        bits = test_pattern_bits(column);
+      } else {
+        int char_index = column / FONT_CHAR_WIDTH;
+        int col_in_char = column % FONT_CHAR_WIDTH;
+        shown = current[char_index];
+
+        // col_in_char == FONT_GLYPH_WIDTH is the blank inter-character
+        // spacing column, so bits stays 0 (all coils off, no burst) for it.
+        if (col_in_char < FONT_GLYPH_WIDTH) {
+          uint16_t glyph[FONT_GLYPH_WIDTH];
+          font_get_glyph(current[char_index], glyph);
+          bits = glyph[col_in_char];
+        }
       }
 
       // Scale the burst to the measured column period so dots stay short and
@@ -724,7 +753,7 @@ void print_engine_run() {
       uint32_t now = millis();
       if (now - last_log_ms >= LOG_INTERVAL_MS) {
         log_i("print engine: pos=%ld col=%ld/%ld char='%c' bits=0x%04x period_us=%lu burst_us=%lu overruns=%lu",
-              (long)pos, (long)column, (long)total_columns, current[char_index], bits,
+              (long)pos, (long)column, (long)total_columns, shown, bits,
               (unsigned long)period_us, (unsigned long)burst_us, (unsigned long)overrun_count);
         last_log_ms = now;
       }

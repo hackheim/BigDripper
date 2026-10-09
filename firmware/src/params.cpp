@@ -10,6 +10,7 @@ static const uint32_t DEFAULT_COLUMN_BURST_MS = 20;
 static const uint32_t DEFAULT_TRACE_GAP_MS = 1000;
 static const uint32_t DEFAULT_BURST_DUTY_PCT = 50;
 static const uint32_t DEFAULT_MIN_BURST_MS = 4;
+static const uint32_t DEFAULT_TEST_LINE_SPACING = 10;
 
 static Preferences prefs;
 static SemaphoreHandle_t params_mutex;
@@ -22,6 +23,7 @@ static uint32_t column_burst_ms;
 static uint32_t trace_gap_ms;
 static uint32_t burst_duty_pct;
 static uint32_t min_burst_ms;
+static uint32_t test_line_spacing;
 
 void params_begin() {
   params_mutex = xSemaphoreCreateMutex();
@@ -36,6 +38,7 @@ void params_begin() {
   trace_gap_ms = prefs.getUInt("tracegapms", DEFAULT_TRACE_GAP_MS);
   burst_duty_pct = prefs.getUInt("burstduty", DEFAULT_BURST_DUTY_PCT);
   min_burst_ms = prefs.getUInt("minburstms", DEFAULT_MIN_BURST_MS);
+  test_line_spacing = prefs.getUInt("testspacing", DEFAULT_TEST_LINE_SPACING);
 }
 
 float params_get_scale_mm_per_detent() {
@@ -147,5 +150,19 @@ void params_set_min_burst_ms(uint32_t v) {
   xSemaphoreTake(params_mutex, portMAX_DELAY);
   min_burst_ms = v;
   prefs.putUInt("minburstms", v);
+  xSemaphoreGive(params_mutex);
+}
+
+uint32_t params_get_test_line_spacing() {
+  xSemaphoreTake(params_mutex, portMAX_DELAY);
+  uint32_t v = test_line_spacing;
+  xSemaphoreGive(params_mutex);
+  return v;
+}
+
+void params_set_test_line_spacing(uint32_t v) {
+  xSemaphoreTake(params_mutex, portMAX_DELAY);
+  test_line_spacing = v;
+  prefs.putUInt("testspacing", v);
   xSemaphoreGive(params_mutex);
 }

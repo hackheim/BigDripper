@@ -3,6 +3,7 @@
 #include "params.h"
 #include "priming.h"
 #include "trace.h"
+#include "test_pattern.h"
 #include <WiFi.h>
 #include <WebServer.h>
 #include <ESPmDNS.h>
@@ -31,6 +32,7 @@ static const char PAGE_HTML[] PROGMEM = R"HTML(
 <style>
 body{font-family:sans-serif;max-width:480px;margin:2em auto;padding:0 1em}
 input[type=text]{width:100%;font-size:1.2em;padding:.4em;box-sizing:border-box}
+input[type=number]{width:5em;font-size:1.2em;padding:.3em}
 button{font-size:1.2em;padding:.5em 1.5em;margin-top:.5em}
 ol{padding-left:1.3em} li{margin:.2em 0}
 .current{font-weight:bold}
@@ -54,6 +56,16 @@ ol{padding-left:1.3em} li{margin:.2em 0}
 </form>
 <form method="POST" action="/trace/stop">
 <button type="submit">Trace off</button>
+</form>
+
+<p>Test pattern: <span class="priming-status">%TEST%</span></p>
+<form method="POST" action="/test/start">
+<label>Vertical line every
+<input type="number" name="spacing" min="1" value="%TESTSPACING%"> columns</label><br>
+<button type="submit">Lines on</button>
+</form>
+<form method="POST" action="/test/stop">
+<button type="submit">Test off</button>
 </form>
 
 <p>Now printing:</p>
@@ -139,6 +151,8 @@ static void handle_root() {
   page.replace("%MAXLEN%", String(params_get_max_text_len()));
   page.replace("%PRIMING%", priming_is_active() ? "ON" : "off");
   page.replace("%TRACE%", trace_is_active() ? "ON" : "off");
+  page.replace("%TEST%", test_pattern_is_active() ? "ON" : "off");
+  page.replace("%TESTSPACING%", String(params_get_test_line_spacing()));
   server.send(200, "text/html", page);
 }
 
@@ -263,6 +277,31 @@ static void handle_trace_stop() {
   server.send(303);
 }
 
+// Also how the spacing is changed: pressing "Lines on" again while the
+// pattern runs applies the new spacing from the next column on.
+static void handle_test_start() {
+  if (server.hasArg("spacing")) {
+    long v = server.arg("spacing").toInt();
+    if (v < 1) {
+      server.send(400, "text/plain", "Line spacing must be at least 1 column.");
+      return;
+    }
+    params_set_test_line_spacing((uint32_t)v);
+  }
+  test_pattern_start();
+  log_i("test pattern started, vertical line every %lu columns",
+        (unsigned long)params_get_test_line_spacing());
+  server.sendHeader("Location", "/");
+  server.send(303);
+}
+
+static void handle_test_stop() {
+  test_pattern_stop();
+  log_i("test pattern stopped");
+  server.sendHeader("Location", "/");
+  server.send(303);
+}
+
 static void web_task(void *arg) {
   WiFi.mode(WIFI_AP);
   WiFi.softAP(AP_SSID, AP_PASSWORD);
@@ -285,6 +324,8 @@ static void web_task(void *arg) {
   server.on("/prime/stop", HTTP_POST, handle_prime_stop);
   server.on("/trace/start", HTTP_POST, handle_trace_start);
   server.on("/trace/stop", HTTP_POST, handle_trace_stop);
+  server.on("/test/start", HTTP_POST, handle_test_start);
+  server.on("/test/stop", HTTP_POST, handle_test_stop);
   server.on("/params", HTTP_GET, handle_params_page);
   server.on("/params/set", HTTP_POST, handle_params_set);
   server.begin();

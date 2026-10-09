@@ -44,6 +44,11 @@ void params_set_min_burst_ms(uint32_t v);
 uint32_t params_get_trace_gap_ms();
 void params_set_trace_gap_ms(uint32_t v);
 
+// Test pattern only: a vertical line is printed every this many columns.
+// 1 = a line on every column.
+uint32_t params_get_test_line_spacing();
+void params_set_test_line_spacing(uint32_t v);
+
 // Longest text the queue will accept, in characters.
 size_t params_get_max_text_len();
 void params_set_max_text_len(size_t v);
