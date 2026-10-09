@@ -1,30 +1,31 @@
 #pragma once
 #include <Arduino.h>
+#include <vector>
 
-// Monospace bitmap font for the 16-nozzle print head, natively 16 rows tall
-// (one row per nozzle) so there's no upscaling blur/blockiness. Caps, digits
-// and space only. Each glyph is FONT_GLYPH_WIDTH columns wide; each column is
-// a uint16_t meant to be fed straight into set_coil_state() (bit 15 = COIL1/
-// top nozzle ... bit 0 = COIL16/bottom nozzle, same convention as
-// example_valve_control.cpp). FONT_CHAR_WIDTH adds one blank column of
-// inter-character spacing.
+// Bitmap fonts for the 16-nozzle print head: every glyph is 16 rows tall,
+// one row per nozzle. The glyph shapes live in font_design/gen_font.py,
+// which generates font_data.cpp; see font_design/font_preview.txt for what
+// they look like.
 //
-// Assumes COIL1 is mounted at the top of the head and COIL16 at the bottom;
-// flip the row-to-bit mapping in font.cpp's convert_glyph() if that's
-// backwards.
+// What a text can contain:
+//   - A-Z (lowercase is printed as uppercase), Æ Ø Å (æ ø å too), 0-9,
+//     space and . , ! ? - : '
+//   - *bold*: an asterisk switches between regular and bold weight, so
+//     "HI *THERE*" prints THERE in bold. The asterisks aren't printed.
+//   - Emoji: :-) :-( :-D :-| :-/ ;-) :-O :-P (the nose is optional, letters
+//     either case), <3 for a heart, :drop: and :star:.
+// Anything else prints as a space.
 
 const int FONT_HEIGHT = 16;
-const int FONT_GLYPH_WIDTH = 8;
-const int FONT_CHAR_WIDTH = FONT_GLYPH_WIDTH + 1;
 
-// Builds the glyph lookup table. Must be called once (e.g. from setup())
-// before font_get_glyph() or font_print_ascii().
-void font_init();
+// Blank columns printed after every glyph.
+const int FONT_SPACING = 1;
 
-// Writes FONT_GLYPH_WIDTH columns for `c` into out[0..FONT_GLYPH_WIDTH-1].
-// Case-insensitive; unsupported characters produce a blank glyph.
-void font_get_glyph(char c, uint16_t *out);
+// Renders `text` into the columns to print, left to right, spacing
+// included. Each value is fed straight into set_coil_state() (bit 15 =
+// COIL1 ... bit 0 = COIL16).
+std::vector<uint16_t> font_render(const String &text);
 
-// Debug helper: logs `c`'s glyph as FONT_HEIGHT rows of '#'/'.' via log_i,
-// so the font can be sanity-checked over serial without real hardware.
-void font_print_ascii(char c);
+// Debug helper: logs `text` as FONT_HEIGHT rows of '#'/'.' via log_i, the
+// right way up, so the font can be checked over serial without hardware.
+void font_print_ascii(const String &text);

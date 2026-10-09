@@ -356,12 +356,11 @@ void setup() {
 
   log_i("setup() on core %d", xPortGetCoreID());
 
-  // params_begin()/font_init() must complete before the tasks below start,
-  // since valve_task's print engine reads params and glyphs from the moment
-  // it runs, and valve_task's priority is high enough to preempt setup()
-  // (still running as loopTask) as soon as it's created.
+  // params_begin() must complete before the tasks below start, since
+  // valve_task's print engine reads params from the moment it runs, and
+  // valve_task's priority is high enough to preempt setup() (still running
+  // as loopTask) as soon as it's created.
   params_begin();
-  font_init();
 
   // 4096-byte stacks: both tasks call log_i, and the vsnprintf underneath it is
   // the stack-hungry part. Priorities are above loopTask's 1 so neither is
@@ -506,6 +505,9 @@ void print_engine_run() {
   coil_timer_begin();
 
   String current = "";
+  // `current` rendered to coil states, one per column, spacing included.
+  // Rendered once when the text becomes current rather than per column.
+  std::vector<uint16_t> current_columns;
   int32_t last_column = -1;
 
   // True while printing TEXT_QUEUE_DEFAULT_TEXT because nothing is queued.
@@ -641,6 +643,7 @@ void print_engine_run() {
       }
       if (text != current || use_default != looping_default) {
         current = text;
+        current_columns = font_render(current);
         looping_default = use_default;
         last_column = -1;
         // A new text starting is a deliberate print, so fire its first column.
@@ -650,8 +653,15 @@ void print_engine_run() {
         log_i("print engine: now printing \"%s\"", current.c_str());
       }
 
-      if (current.length() == 0) {
+      if (current_columns.empty()) {
         set_coil_state(0x0000);
+        if (current.length() > 0 && !looping_default) {
+          // Queued text with nothing printable in it (e.g. just "**"). The
+          // scan below would never reach its end, so skip it rather than
+          // stalling the queue.
+          log_i("print engine: nothing to print in \"%s\", skipping", current.c_str());
+          text_queue_advance();
+        }
         ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(5));
         continue;
       }
@@ -668,7 +678,7 @@ void print_engine_run() {
     // The test pattern has no end; only text wraps or advances the queue.
     int32_t total_columns = 0;
     if (!testing) {
-      total_columns = (int32_t)current.length() * FONT_CHAR_WIDTH;
+      total_columns = (int32_t)current_columns.size();
       if (looping_default) {
         // Wrap instead of advancing, so the default text repeats seamlessly
         // for as long as the wheel keeps turning.
@@ -708,23 +718,7 @@ void print_engine_run() {
       last_column_change_us = now_us;
       have_last_change_us = true;
 
-      uint16_t bits = 0;
-      char shown = '|';  // for the log line only
-      if (testing) {
-        bits = test_pattern_bits(column);
-      } else {
-        int char_index = column / FONT_CHAR_WIDTH;
-        int col_in_char = column % FONT_CHAR_WIDTH;
-        shown = current[char_index];
-
-        // col_in_char == FONT_GLYPH_WIDTH is the blank inter-character
-        // spacing column, so bits stays 0 (all coils off, no burst) for it.
-        if (col_in_char < FONT_GLYPH_WIDTH) {
-          uint16_t glyph[FONT_GLYPH_WIDTH];
-          font_get_glyph(current[char_index], glyph);
-          bits = glyph[col_in_char];
-        }
-      }
+      uint16_t bits = testing ? test_pattern_bits(column) : current_columns[column];
 
       // Scale the burst to the measured column period so dots stay short and
       // separate at speed, capped at the walking-speed default and floored
@@ -752,8 +746,8 @@ void print_engine_run() {
 
       uint32_t now = millis();
       if (now - last_log_ms >= LOG_INTERVAL_MS) {
-        log_i("print engine: pos=%ld col=%ld/%ld char='%c' bits=0x%04x period_us=%lu burst_us=%lu overruns=%lu",
-              (long)pos, (long)column, (long)total_columns, shown, bits,
+        log_i("print engine: pos=%ld col=%ld/%ld bits=0x%04x period_us=%lu burst_us=%lu overruns=%lu",
+              (long)pos, (long)column, (long)total_columns, bits,
               (unsigned long)period_us, (unsigned long)burst_us, (unsigned long)overrun_count);
         last_log_ms = now;
       }

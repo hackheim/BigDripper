@@ -27,7 +27,7 @@ static const char *PARAMS_PASSWORD = "letmeprint9";
 static WebServer server(80);
 
 static const char PAGE_HTML[] PROGMEM = R"HTML(
-<!DOCTYPE html><html><head><title>BigDripper</title>
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>BigDripper</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
 body{font-family:sans-serif;max-width:480px;margin:2em auto;padding:0 1em}
@@ -39,6 +39,8 @@ ol{padding-left:1.3em} li{margin:.2em 0}
 .empty{color:#888;font-style:italic}
 .priming button{background:#c0392b;color:#fff}
 .priming-status{font-weight:bold}
+.hint{color:#555;font-size:.9em}
+code{background:#eee;padding:0 .2em}
 </style></head><body>
 <h1>BigDripper</h1>
 
@@ -78,13 +80,18 @@ ol{padding-left:1.3em} li{margin:.2em 0}
 <input type="text" name="text" maxlength="%MAXLEN%" autofocus placeholder="Text to print">
 <button type="submit">Add to queue</button>
 </form>
+<p class="hint">Letters A&ndash;Z, &AElig;&Oslash;&Aring;, 0&ndash;9 and <code>. , ! ? - : '</code>.
+Put <code>*stars*</code> around words to print them bold.<br>
+Emoji: <code>:-)</code> <code>:-(</code> <code>:-D</code> <code>:-|</code> <code>:-/</code>
+<code>;-)</code> <code>:-O</code> <code>:-P</code> <code>&lt;3</code>
+<code>:drop:</code> <code>:star:</code></p>
 
 <p><a href="/params">Settings</a></p>
 </body></html>
 )HTML";
 
 static const char PARAMS_HTML[] PROGMEM = R"HTML(
-<!DOCTYPE html><html><head><title>BigDripper settings</title>
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>BigDripper settings</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
 body{font-family:sans-serif;max-width:480px;margin:2em auto;padding:0 1em}
@@ -153,7 +160,7 @@ static void handle_root() {
   page.replace("%TRACE%", trace_is_active() ? "ON" : "off");
   page.replace("%TEST%", test_pattern_is_active() ? "ON" : "off");
   page.replace("%TESTSPACING%", String(params_get_test_line_spacing()));
-  server.send(200, "text/html", page);
+  server.send(200, "text/html; charset=utf-8", page);
 }
 
 static void handle_params_page() {
@@ -168,7 +175,7 @@ static void handle_params_page() {
   page.replace("%BURSTDUTY%", String(params_get_burst_duty_pct()));
   page.replace("%MINBURSTMS%", String(params_get_min_burst_ms()));
   page.replace("%TRACEGAPMS%", String(params_get_trace_gap_ms()));
-  server.send(200, "text/html", page);
+  server.send(200, "text/html; charset=utf-8", page);
 }
 
 static void handle_params_set() {
