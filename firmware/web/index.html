@@ -72,35 +72,50 @@ doesn&rsquo;t have prints as a space.</p>
 
 <details id="settings">
 <summary>Settings</summary>
+<div id="sim">
+<p class="help">The simulator prints a text with the board&rsquo;s own engine (the same
+code, compiled for the browser) and shows where the water lands, to scale: with the
+saved settings, and with your edits below before you save them. The water model is
+a guess until its numbers are matched to a photo of a real print.</p>
+<div id="simtext"><input type="text" id="sim_text" value="HELLO" autocomplete="off">
+<select id="sim_font"><option value="drip">Drip</option><option value="drip_bold">Drip bold</option><option value="spleen">Spleen</option></select></div>
+<div class="tabs" id="rides">
+<button type="button" data-r="steady" aria-pressed="true">Steady</button>
+<button type="button" data-r="ramp" aria-pressed="false">Speeding up</button>
+<button type="button" data-r="replay" aria-pressed="false">Replay a ride</button>
+</div>
+<p>At <input type="number" id="sim_kmh" min="0.5" step="0.5"> km/h
+<span class="ride help" data-r="steady">(the notes below are worked out at this speed too)</span>
+<span class="ride help" data-r="ramp" hidden>for the notes below; the simulator goes</span></p>
+<p class="ride" data-r="ramp" hidden>from <input type="number" id="sim_from" min="0" step="0.5">
+to <input type="number" id="sim_to" min="0.5" step="0.5"> km/h
+over <input type="number" id="sim_secs" min="0.1" step="0.5"> s</p>
+<p class="ride help" data-r="replay" hidden>The simulator replays the speeds of the last 20 s
+of the live view (needs the board connected and the wheel turned).</p>
+<details id="water">
+<summary>Water model</summary>
+<div id="water_fields"></div>
+</details>
+</div>
+<div id="preview">
+<p class="simtitle" id="sim_a_title">Saved settings</p>
+<div class="ground"><canvas id="sim_a"></canvas></div>
+<p class="siminfo" id="sim_a_info"></p>
+<div id="sim_b_box" hidden>
+<p class="simtitle">Your edits, not saved yet</p>
+<div class="ground"><canvas id="sim_b"></canvas></div>
+<p class="siminfo" id="sim_b_info"></p>
+</div>
+</div>
 <form id="unlock">
 <label>Settings password
 <input type="password" id="password" autocomplete="current-password"></label>
-<button type="submit">Unlock</button>
+<button type="submit">Unlock to change settings</button>
 </form>
 <form id="sf" hidden>
-<label>Scale (mm of travel per encoder detent)
-<input type="text" inputmode="decimal" name="scale_mm_per_detent"></label>
-<label>Encoder detents per printed column
-<input type="number" name="clicks_per_column" min="1"></label>
-<label>Letter spacing (blank columns between characters, 0-8)
-<input type="number" name="letter_spacing" min="0" max="8"></label>
-<label>Max text length (printed characters, emoji count as 1)
-<input type="number" name="max_text_len" min="1" max="255"></label>
-<label>Pause between prints (ms)
-<input type="number" name="print_pause_ms" min="0"></label>
-<label>Max column burst (ms)
-<input type="number" name="column_burst_ms" min="1"></label>
-<label>Burst duty (% of column period, 5-95)
-<input type="number" name="burst_duty_pct" min="5" max="95"></label>
-<label>Min column burst (ms)
-<input type="number" name="min_burst_ms" min="1"></label>
-<label>Min column time (ms, 0 = never stretch). At speed, columns get wider so
-each takes at least this long, and text stretches instead of the valves falling behind.
-<input type="number" name="min_column_ms" min="0"></label>
-<label>Max stretch (% of normal column width, 100-1000)
-<input type="number" name="max_stretch_pct" min="100" max="1000"></label>
-<label>Trace delay between bursts (ms)
-<input type="number" name="trace_gap_ms" min="0"></label>
+<p class="help">Set the distance per encoder click first: every size and speed
+in the notes is worked out from it.</p>
+<div id="fields"></div>
 <button type="submit">Save</button>
 </form>
 <p id="smsg"></p>
@@ -110,4 +125,6 @@ each takes at least this long, and text stretches instead of the valves falling 
 <script src="app.js"></script>
 <script src="monitor.js"></script>
 <script src="settings.js"></script>
+<script src="sim.js"></script>
+<script src="simulator.js"></script>
 </body></html>

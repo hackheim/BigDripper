@@ -6,6 +6,9 @@
 // survive a reboot. Call params_begin() once from setup(), before anything
 // reads them.
 //
+// params_check(), params_to_engine() and SETTINGS_DEFAULTS (settings.cpp)
+// are plain C++, also built into the web simulator (sim/).
+//
 // They're read and written as a whole: params_check() a changed copy, then
 // params_set() it, so a rejected form never leaves half of it saved and the
 // print engine never sees a mix of old and new values.
@@ -45,14 +48,22 @@ struct Settings {
   // to messages queued from then on, and the default text.
   uint32_t letter_spacing;
 
-  // Stretching: at speed, columns are widened so each takes at least this
-  // long to cross. 0 = never stretch.
-  uint32_t min_column_ms;
+  // Stretching: above this speed, columns widen in step with it, so each
+  // still takes as long to cross as at this speed and text gets wider
+  // instead of the valves falling behind. km/h, 0 = never stretch.
+  float stretch_above_kmh;
 
   // The most a column is widened, as a percentage of its normal width.
   // 100-1000.
   uint32_t max_stretch_pct;
 };
+
+// Quadrature edges per encoder detent: settings count detents, the engine
+// counts edges.
+const int ENCODER_COUNTS_PER_DETENT = 4;
+
+// Used until settings are first saved, and by the simulator.
+extern const Settings SETTINGS_DEFAULTS;
 
 void params_begin();
 

@@ -68,7 +68,7 @@ static void settings_json(JsonDocument &doc) {
   doc["trace_gap_ms"] = s.trace_gap_ms;
   doc["test_line_spacing"] = s.test_line_spacing;
   doc["letter_spacing"] = s.letter_spacing;
-  doc["min_column_ms"] = s.min_column_ms;
+  doc["stretch_above_kmh"] = s.stretch_above_kmh;
   doc["max_stretch_pct"] = s.max_stretch_pct;
 }
 
@@ -134,6 +134,15 @@ static bool field_uint(JsonObjectConst args, const char *name, uint32_t *out) {
   return true;
 }
 
+// Same for a number (whole or not).
+static bool field_float(JsonObjectConst args, const char *name, float *out) {
+  JsonVariantConst v = args[name];
+  if (v.isNull()) return true;
+  if (!v.is<float>()) return false;
+  *out = v.as<float>();
+  return true;
+}
+
 // Saves a new set of settings and hands them to the print engine, or
 // leaves everything as it was and returns why not.
 static const char *apply_settings(const Settings &s) {
@@ -192,12 +201,9 @@ static int save_settings(JsonObjectConst args, JsonDocument &reply) {
   // Every field is read first (missing ones keep their saved value) and the
   // result checked as a whole, so a rejected request saves none of it.
   Settings s = params_get();
-  JsonVariantConst scale = args["scale_mm_per_detent"];
-  if (!scale.isNull()) {
-    if (!scale.is<float>() || !(scale.as<float>() > 0)) {
-      return error(reply, 400, "scale_mm_per_detent must be a number above 0.");
-    }
-    s.scale_mm_per_detent = scale.as<float>();
+  if (!field_float(args, "scale_mm_per_detent", &s.scale_mm_per_detent) ||
+      !field_float(args, "stretch_above_kmh", &s.stretch_above_kmh)) {
+    return error(reply, 400, "scale_mm_per_detent and stretch_above_kmh must be numbers.");
   }
   if (!field_uint(args, "max_text_len", &s.max_text_len) || !field_uint(args, "print_pause_ms", &s.print_pause_ms) ||
       !field_uint(args, "clicks_per_column", &s.clicks_per_column) ||
@@ -206,9 +212,8 @@ static int save_settings(JsonObjectConst args, JsonDocument &reply) {
       !field_uint(args, "min_burst_ms", &s.min_burst_ms) || !field_uint(args, "trace_gap_ms", &s.trace_gap_ms) ||
       !field_uint(args, "test_line_spacing", &s.test_line_spacing) ||
       !field_uint(args, "letter_spacing", &s.letter_spacing) ||
-      !field_uint(args, "min_column_ms", &s.min_column_ms) ||
       !field_uint(args, "max_stretch_pct", &s.max_stretch_pct)) {
-    return error(reply, 400, "Settings other than the scale must be whole numbers, 0 or more.");
+    return error(reply, 400, "Settings other than those two must be whole numbers, 0 or more.");
   }
   const char *err = apply_settings(s);
   if (err != nullptr) return error(reply, 400, err);

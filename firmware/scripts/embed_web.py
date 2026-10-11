@@ -19,6 +19,7 @@ MIME = {
     ".css": "text/css; charset=utf-8",
     ".svg": "image/svg+xml",
     ".ico": "image/x-icon",
+    ".wasm": "application/wasm",
 }
 # Not served: documentation and local development helpers.
 SKIP = {".md", ".py"}

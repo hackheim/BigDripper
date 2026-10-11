@@ -31,6 +31,14 @@ To try the Bluetooth version without hosting it anywhere, serve `web/` locally. 
 
 The main page has a "Live view" at the bottom, drawn from the print task's history. It shows the coils over time (or column by column, as they land on the ground) and speed and burst length below. Red marks show records that never reached the page, orange shows columns the wheel jumped over, and purple shows overruns.
 
+## Simulator
+
+The page's "Simulator" section shows what a text would look like on the ground, with the saved settings and with unsaved edits. It runs the board's own print engine, compiled to WebAssembly: `sim/sim.cpp` drives `lib/drip_core` over a simulated ride, using the same font and settings code as the firmware. On top of that sits a simple water model (valve delays, dribble from the tube after closing, nozzle spacing, spot size) in `web/sim.js`, whose numbers are guesses until matched to photos of real prints. The ride can be a steady speed, speeding up, or a replay of the live view's last 20 s.
+
+`web/sim.wasm` is committed, so building the firmware doesn't need Emscripten. After changing the engine, the fonts or `src/settings.cpp`, rebuild it (`brew install emscripten` once):
+
+    sh sim/build.sh
+
 ## Font
 
 The Drip glyphs are defined in `font_design/gen_font.py`, and the Spleen font's bitmaps in `font_design/spleen_8x16.py`. After changing it, regenerate the preview and the firmware tables from this directory:

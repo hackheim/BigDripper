@@ -109,7 +109,7 @@ Lines mode's spacing, in columns. This is the one setting the main page may chan
   "trace_gap_ms": 1000,
   "test_line_spacing": 10,
   "letter_spacing": 1,
-  "min_column_ms": 0,
+  "stretch_above_kmh": 0,
   "max_stretch_pct": 300
 }
 ```
@@ -119,14 +119,15 @@ Lines mode's spacing, in columns. This is the one setting the main page may chan
 Any subset of the fields above; missing ones keep their saved value. The result is checked as a whole: either everything is saved and handed to the print engine, or a `400` says why and nothing changes. Replies with all the settings.
 
 Rules:
-- `scale_mm_per_detent` must be above 0.
-- `max_text_len` is 1–255.
-- `clicks_per_column` is at least 1.
-- `min_column_ms` (0 = off) stretches text at speed: each column is made wide enough to take at least this long to cross, up to `max_stretch_pct` (100–1000) of its normal width. Burst length follows the stretched column.
-- `letter_spacing` is 0–8 blank columns between characters. A change applies to messages queued from then on and to the default text (which restarts if it's printing); messages already queued keep their spacing.
-- `burst_duty_pct` is 5–95.
-- `min_burst_ms` is between 1 and `column_burst_ms`.
+- `scale_mm_per_detent` (distance per encoder click, mm) must be above 0.
+- `max_text_len` (longest message) is 1–255.
+- `clicks_per_column` (column width, in encoder clicks) is at least 1.
+- `column_burst_ms` (longest spray) and `min_burst_ms` (shortest spray): `min_burst_ms` is between 1 and `column_burst_ms`. A column sprays for `burst_duty_pct` (5–95) of the time the cart takes to cross it, kept between the two.
+- `stretch_above_kmh` (0 = off): above this speed, columns widen in step with speed, so each takes as long to cross as at this speed, up to `max_stretch_pct` (100–1000) of the normal width. Spray length follows the stretched column. A number, like the scale.
+- `letter_spacing` (gap between letters) is 0–8 blank columns after each character. A change applies to messages queued from then on and to the default text (which restarts if it's printing); messages already queued keep their spacing.
 - Everything else is a whole number, 0 or more.
+
+The web page's settings section explains each one, with what it works out to on the ground.
 
 ## History
 

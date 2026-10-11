@@ -1,6 +1,7 @@
 #pragma once
 #include <Arduino.h>
 #include "drip/types.h"
+#include "params.h"  // ENCODER_COUNTS_PER_DETENT
 
 // The carriage encoder, counted by the hardware pulse counter (PCNT) in
 // full x4 quadrature with a glitch filter, so no edge depends on an
@@ -9,9 +10,6 @@
 // Positions are 64-bit counts (drip::Position). Instead of an interrupt per
 // edge, the print engine's wake window is set as two PCNT watch points just
 // outside it, so the only interrupt is the one that crosses out of it.
-
-// Quadrature edges per detent.
-const int ENCODER_COUNTS_PER_DETENT = 4;
 
 // Sets up the counter and its interrupt. The interrupt lands on the core
 // this runs on, so call it from the print engine's task on its core. Every

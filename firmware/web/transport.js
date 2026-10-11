@@ -9,11 +9,13 @@
 // Served by the board itself, that's HTTP and server-sent events. Served
 // from anywhere else it's Bluetooth (Web Bluetooth, which needs HTTPS or
 // localhost): Board.pick() asks the user to choose the board, and needs a
-// tap to call it from.
+// tap to call it from. ?transport=http or ?transport=ble in the URL
+// overrides the choice (e.g. a page on localhost talking to a mock board).
 
 var Board = (function () {
+  var forced = /[?&]transport=(http|ble)\b/.exec(location.search);
   var board = {
-    kind: window.isSecureContext && navigator.bluetooth ? 'ble' : 'http',
+    kind: forced ? forced[1] : window.isSecureContext && navigator.bluetooth ? 'ble' : 'http',
     password: '',  // the settings password, sent with every request if set
     connected: false,
   };
