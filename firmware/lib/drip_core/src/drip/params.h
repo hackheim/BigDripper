@@ -31,6 +31,14 @@ struct Params {
   // Pause between one queued message finishing and the next one starting.
   Micros message_pause_us = 2000000;
 
+  // Stretching: at speed, columns are widened so each takes at least this
+  // long to cross, and the text gets wider on the ground instead of its
+  // columns getting too short for the valves. 0 = never stretch.
+  Micros min_column_us = 0;
+
+  // The most a column is widened, as a percentage of counts_per_column.
+  uint32_t max_stretch_pct = 300;
+
   // No column change for this long and the speed estimate is forgotten
   // (the bike stopped), so the next burst falls back to max_burst_us.
   Micros speed_timeout_us = 500000;

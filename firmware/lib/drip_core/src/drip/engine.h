@@ -32,6 +32,7 @@ struct Status {
   std::vector<MessageInfo> pending;  // queued behind `current`, in order
   int32_t column = -1;               // last column scanned, -1 for none yet
   int32_t total_columns = 0;         // of `current`; 0 in Lines
+  int32_t column_width = 0;          // counts, of the last column; > counts_per_column when stretched
   uint32_t overruns = 0;
 };
 
@@ -84,6 +85,9 @@ class Engine {
 
   // The current speed estimate, for telemetry.
   const SpeedEstimator &speed() const { return speed_; }
+
+  // Width of the last column entered, in counts (stretched at speed).
+  int32_t column_width() const { return scanner_.column_width(); }
 
  private:
   void enter(Mode mode, Micros now, const Sample &s, StepResult &out);

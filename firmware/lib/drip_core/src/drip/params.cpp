@@ -13,6 +13,10 @@ const char *params_validate(const Params &p) {
   if (p.line_spacing < 1) return "Line spacing must be at least 1 column.";
   if (p.message_pause_us < 0) return "Pause between messages can't be negative.";
   if (p.speed_timeout_us < 1) return "Speed timeout must be positive.";
+  if (p.min_column_us < 0) return "Min column time can't be negative.";
+  if (p.max_stretch_pct < 100 || p.max_stretch_pct > 1000) {
+    return "Max stretch must be between 100 and 1000 %.";
+  }
   return nullptr;
 }
 

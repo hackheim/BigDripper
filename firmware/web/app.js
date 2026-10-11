@@ -153,7 +153,7 @@ var Drip = {
       if (seq < this.next) continue;
       var r = b.r[i];
       this.history.push({ seq: seq, kind: KINDS[r[0]], at: r[1], value: r[2], bits: r[3],
-                          open: r[4], overrun: !!r[5], speed: r[6] });
+                          open: r[4], overrun: !!r[5], speed: r[6], stretch: r[7] });
       this.next = seq + 1;
     }
     if (this.next < b.next) this.next = b.next;

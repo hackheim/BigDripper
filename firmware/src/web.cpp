@@ -90,6 +90,8 @@ static void settings_json(JsonDocument &doc) {
   doc["trace_gap_ms"] = s.trace_gap_ms;
   doc["test_line_spacing"] = s.test_line_spacing;
   doc["letter_spacing"] = s.letter_spacing;
+  doc["min_column_ms"] = s.min_column_ms;
+  doc["max_stretch_pct"] = s.max_stretch_pct;
 }
 
 // One read of the history: what came back, and from where. Records are
@@ -111,6 +113,7 @@ static void history_json(JsonDocument &doc, const History::Read &rd, const Recor
     a.add(r.open_us == Record::HELD ? -1 : (int64_t)r.open_us);
     a.add(r.overrun);
     a.add(lroundf(r.counts_per_s));
+    a.add(r.stretch_pct);
   }
 }
 
@@ -278,7 +281,9 @@ static void handle_settings_set(AsyncWebServerRequest *req, JsonVariant &json) {
       !field_uint(body, "burst_duty_pct", &s.burst_duty_pct) ||
       !field_uint(body, "min_burst_ms", &s.min_burst_ms) || !field_uint(body, "trace_gap_ms", &s.trace_gap_ms) ||
       !field_uint(body, "test_line_spacing", &s.test_line_spacing) ||
-      !field_uint(body, "letter_spacing", &s.letter_spacing)) {
+      !field_uint(body, "letter_spacing", &s.letter_spacing) ||
+      !field_uint(body, "min_column_ms", &s.min_column_ms) ||
+      !field_uint(body, "max_stretch_pct", &s.max_stretch_pct)) {
     return send_error(req, 400, "Settings other than the scale must be whole numbers, 0 or more.");
   }
   if (!apply_settings(req, s)) return;

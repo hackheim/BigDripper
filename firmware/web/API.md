@@ -93,7 +93,9 @@ Lines mode's spacing, in columns. This is the one setting the main page may chan
   "min_burst_ms": 4,
   "trace_gap_ms": 1000,
   "test_line_spacing": 10,
-  "letter_spacing": 1
+  "letter_spacing": 1,
+  "min_column_ms": 0,
+  "max_stretch_pct": 300
 }
 ```
 
@@ -105,6 +107,7 @@ Rules:
 - `scale_mm_per_detent` must be above 0.
 - `max_text_len` is 1–255.
 - `clicks_per_column` is at least 1.
+- `min_column_ms` (0 = off) stretches text at speed: each column is made wide enough to take at least this long to cross, up to `max_stretch_pct` (100–1000) of its normal width. Burst length follows the stretched column.
 - `letter_spacing` is 0–8 blank columns between characters. A change applies to messages queued from then on and to the default text (which restarts if it's printing); messages already queued keep their spacing.
 - `burst_duty_pct` is 5–95.
 - `min_burst_ms` is between 1 and `column_burst_ms`.
@@ -131,11 +134,11 @@ Every record from sequence number `N` on, or as many as the board still has.
 | `reset` | `since` was ahead of the board, e.g. from before a reboot. Start over from `first`. |
 | `now` | Board time, in microseconds since boot: the clock `at` is on. |
 
-Each record is `[kind, at, value, bits, open_us, overrun, speed]`:
+Each record is `[kind, at, value, bits, open_us, overrun, speed, stretch]`:
 
 | `kind` | Meaning |
 |---|---|
-| `0` coils | The coils were set: a column, a Trace pulse, Prime, or closing everything. `bits` is which are open (bit 15 = COIL1). `value` is the column index, or -1 if this isn't a column. `open_us` is how long they stay open: 0 if `bits` is 0, -1 if until the next coils record (Prime). `overrun` is 1 if the previous burst was still open. `speed` is the speed estimate in encoder counts per second, 0 if there isn't one. |
+| `0` coils | The coils were set: a column, a Trace pulse, Prime, or closing everything. `bits` is which are open (bit 15 = COIL1). `value` is the column index, or -1 if this isn't a column. `open_us` is how long they stay open: 0 if `bits` is 0, -1 if until the next coils record (Prime). `overrun` is 1 if the previous burst was still open. `speed` is the speed estimate in encoder counts per second, 0 if there isn't one. `stretch` is, for a column, its width as a percentage of the normal width (100 = not stretched). |
 | `1` skipped | The wheel jumped past `value` columns that never fired. |
 | `2` mode | The mode changed to `value`: 0 off, 1 prime, 2 trace, 3 lines, 4 text. |
 | `3` message started | `value` is 1 for the default text, 0 for a queued message. |

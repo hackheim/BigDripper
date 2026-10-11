@@ -38,6 +38,7 @@ struct Fired {
   int32_t column;
   uint16_t bits;
   Micros burst;
+  Position pos;
 };
 
 struct Rig {
@@ -62,7 +63,7 @@ struct Rig {
     for (int i = 0; i < last.event_count; i++) {
       events.push_back(last.events[i]);
       if (last.events[i].kind == Event::ColumnFired) {
-        fired.push_back({last.events[i].value, last.coils.bits, last.coils.close_at - now});
+        fired.push_back({last.events[i].value, last.coils.bits, last.coils.close_at - now, pos});
       }
     }
     if (last.has_coils) {
@@ -308,19 +309,106 @@ TEST(enqueue_rejects_empty_and_full) {
   CHECK_EQ(r.e.status().pending.size(), Engine::QUEUE_DEPTH - 1);
 }
 
-TEST(column_width_change_keeps_current_column) {
+TEST(column_width_change_applies_from_the_next_column) {
   Rig r;
-  r.move(4 + 2);  // column 1, partway in
+  r.move(4 + 2);  // column 1 (positions 5..8), partway in
   CHECK_EQ(r.fired.back().column, 1);
   Params p = test_params();
   p.counts_per_column = 10;
   r.e.set_params(p);
   r.step();
   CHECK_EQ(r.fired.size(), 2);  // nothing new fired
-  r.move(9);
-  CHECK_EQ(r.fired.size(), 2);
-  r.move(1);
+  r.move(3);                    // column 1 keeps its width: column 2 at 9
   CHECK_EQ(r.fired.back().column, 2);
+  r.move(9);
+  CHECK_EQ(r.fired.size(), 3);
+  r.move(1);                    // column 2 is 10 wide: column 3 at 19
+  CHECK_EQ(r.fired.back().column, 0);  // the default text has 3 columns
+  CHECK_EQ(r.fired.back().pos, 19);
+}
+
+// --- Forward only ---------------------------------------------------------------
+
+TEST(rolling_back_fires_nothing_and_resumes_where_it_left_off) {
+  Rig r;
+  r.move(2 * 4 + 1);  // columns 0, 1, 2 (into 2 at position 9)
+  CHECK_EQ(r.fired.size(), 3);
+  int steps = r.steps;
+  r.move(-10);        // back past where column 0 began
+  CHECK_EQ(r.fired.size(), 3);
+  CHECK_EQ(r.steps, steps);  // rolling back doesn't even wake the engine
+  r.move(10 + 3);     // forward again, to position 12: still column 2
+  CHECK_EQ(r.fired.size(), 3);
+  r.move(1);          // 13: column 3, which wraps to the default's column 0
+  CHECK_EQ(r.fired.size(), 4);
+  CHECK_EQ(r.fired.back().pos, 13);
+}
+
+// --- Stretching -----------------------------------------------------------------
+
+static Params stretch_params() {
+  Params p = test_params();
+  p.min_column_us = 20000;  // 20 ms per column at least
+  p.max_stretch_pct = 300;  // up to 12 counts
+  return p;
+}
+
+// Counts between successive columns from the second column on (the first
+// one starts wherever the scan did).
+static std::vector<Position> pitches(const Rig &r) {
+  std::vector<Position> out;
+  for (size_t i = 2; i < r.fired.size(); i++) out.push_back(r.fired[i].pos - r.fired[i - 1].pos);
+  return out;
+}
+
+TEST(stretch_off_keeps_columns_fixed) {
+  Rig r;  // min_column_us 0
+  r.move(10 * 4, 500);
+  for (Position w : pitches(r)) CHECK_EQ(w, 4);
+}
+
+TEST(stretch_widens_columns_to_the_min_column_time) {
+  Rig r(stretch_params());
+  // 2000 us/count: 4 counts = 8 ms, too short. 20 ms needs 10 counts.
+  r.move(10 * 10, 2000);
+  std::vector<Position> w = pitches(r);
+  CHECK(w.size() >= 8);
+  for (Position x : w) CHECK_EQ(x, 10);
+  // Burst is the duty share of the (stretched) column time: 50% of 20 ms.
+  CHECK_EQ(r.fired.back().burst, 10000);
+  CHECK_EQ(r.e.status().column_width, 10);
+  CHECK_EQ(r.count(Event::Overrun), 0);
+}
+
+TEST(stretch_is_capped) {
+  Rig r(stretch_params());
+  r.move(10 * 12, 500);  // 20 ms would need 40 counts; capped at 12
+  for (Position x : pitches(r)) CHECK_EQ(x, 12);
+}
+
+TEST(stretch_never_narrows) {
+  Rig r(stretch_params());
+  r.move(10 * 4, 20000);  // 4 counts = 80 ms, already long enough
+  for (Position x : pitches(r)) CHECK_EQ(x, 4);
+}
+
+TEST(stretch_follows_speed_changes) {
+  Rig r(stretch_params());
+  r.move(5 * 4, 20000);   // slow: normal width
+  r.move(12 * 10, 2000);  // fast: stretches as the estimate catches up
+  std::vector<Position> w = pitches(r);
+  CHECK_EQ(w.back(), 10);
+  for (Position x : w) CHECK(x >= 4 && x <= 10);
+}
+
+TEST(stretch_params_validation) {
+  Params p = stretch_params();
+  CHECK(params_validate(p) == nullptr);
+  p.max_stretch_pct = 99;
+  CHECK(params_validate(p) != nullptr);
+  p = stretch_params();
+  p.min_column_us = -1;
+  CHECK(params_validate(p) != nullptr);
 }
 
 TEST(default_text_replaced_while_printing) {

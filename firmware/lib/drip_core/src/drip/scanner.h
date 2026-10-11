@@ -27,13 +27,20 @@ struct ColumnSource {
 // long, and which window to be woken by next.
 //
 // This one fires a column the moment the position crosses into it, with
-// the burst sized from the measured speed, and asks to be woken at the
-// column's edges. Alternatives (opening early ahead of a predicted
-// crossing, printing only while moving forwards) would replace this class;
-// the engine around it doesn't change.
+// the burst sized from the measured speed, and asks to be woken when the
+// position reaches the next column. Alternatives (opening early ahead of a
+// predicted crossing) would replace this class; the engine around it
+// doesn't change.
 //
-// Columns are laid out from an origin: column c covers positions
-// [origin + c * counts_per_column, origin + (c + 1) * counts_per_column).
+// Columns are laid out one at a time, each as it's entered: its width is
+// Params::counts_per_column, stretched at speed so a column never takes
+// less than Params::min_column_us (up to Params::max_stretch_pct). So the
+// text gets wider on the ground as the bike speeds up, rather than its
+// columns getting too short for the valves.
+//
+// Printing only goes forwards. Rolling back fires nothing, and nothing
+// fires again until the wheel is back past the furthest point it reached;
+// then the next column carries on from there.
 class ColumnScanner {
  public:
   enum class Result {
@@ -44,11 +51,11 @@ class ColumnScanner {
   // Starts scanning `src` with column 0 beginning one count forward of `s`.
   // Nothing fires until the wheel moves into it, so starting a scan while
   // standing still never sprays anything.
-  void start(const Sample &s, const ColumnSource &src, const Params &p);
+  void start(const Sample &s, const ColumnSource &src);
 
-  // Fires the column `s` is in, if it's a new one, and sets out.wake to its
-  // edges. Doesn't touch the coils otherwise: an open burst closes on its
-  // own timer.
+  // Fires the next column if `s` has reached it, and sets out.wake to wait
+  // for the one after. Doesn't touch the coils otherwise: an open burst
+  // closes on its own timer.
   Result step(Micros now, const Sample &s, const Params &p, const SpeedEstimator &speed,
               StepResult &out);
 
@@ -59,19 +66,23 @@ class ColumnScanner {
   // Columns the source has, 0 for the test pattern.
   int32_t total_columns() const;
 
+  // Width of the last column entered, in counts: counts_per_column, or
+  // more when stretched.
+  int32_t column_width() const { return width_; }
+
   // Columns that fired while the previous burst was still open, i.e. bursts
   // outrunning the column period. Kept across scans; diagnostic only.
   uint32_t overruns() const { return overruns_; }
 
  private:
-  int64_t column_at(Position p) const;
   uint16_t bits(int64_t column, const Params &p) const;
-  Micros burst_us(const Params &p, const SpeedEstimator &speed) const;
+  int32_t width(const Params &p, const SpeedEstimator &speed) const;
+  Micros burst_us(const Params &p, const SpeedEstimator &speed, int32_t width) const;
 
   ColumnSource src_;
-  Position origin_ = 0;
-  int32_t counts_per_column_ = 1;
-  int64_t last_column_ = -1;
+  int64_t column_ = -1;     // last column entered; -1 before the first
+  Position next_start_ = 0;  // where the column after it begins
+  int32_t width_ = 0;
   bool fired_ = false;
   Micros burst_close_at_ = 0;
   uint32_t overruns_ = 0;

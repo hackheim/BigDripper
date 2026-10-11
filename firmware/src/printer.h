@@ -72,6 +72,7 @@ struct Record {
   uint32_t open_us;    // Coils: how long they stay open: 0 if bits is 0,
                        // HELD if until the next Coils record (Prime)
   float counts_per_s;  // Coils: speed estimate, 0 if there isn't one yet
+  uint16_t stretch_pct;  // Coils, a column: its width as % of the normal width
 
   static const uint32_t HELD = UINT32_MAX;
 };

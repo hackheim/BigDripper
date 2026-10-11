@@ -89,7 +89,7 @@ void Engine::enter(Mode mode, Micros now, const Sample &s, StepResult &out) {
       out.set_coils(0x0000, now);
       ColumnSource src;
       src.test_pattern = true;
-      scanner_.start(s, src, params_);
+      scanner_.start(s, src);
       break;
     }
     case Mode::Text:
@@ -132,7 +132,7 @@ void Engine::start_message(const Sample &s, StepResult &out) {
   ColumnSource src;
   src.columns = &m.columns;
   src.loop = !printing_queued_;
-  scanner_.start(s, src, params_);
+  scanner_.start(s, src);
   scanning_message_ = true;
   out.add_event(Event::MessageStarted, printing_queued_ ? 0 : 1);
 }
@@ -157,6 +157,7 @@ Status Engine::status() const {
   for (size_t i = first_pending; i < queue_.size(); i++) st.pending.push_back(queue_[i].info);
   st.column = scanner_.column();
   st.total_columns = scanner_.total_columns();
+  st.column_width = scanner_.column_width();
   st.overruns = scanner_.overruns();
   return st;
 }

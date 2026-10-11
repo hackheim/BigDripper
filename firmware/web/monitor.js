@@ -173,10 +173,12 @@
     var v = moving ? last.speed * mmpc : 0;
     var period = cols.length > 1 && moving ? (last.at - cols[cols.length - 2].at) / 1000 : null;
     var burst = moving && last.open > 0 ? last.open / 1000 : null;
+    var stretch = moving && last.stretch > 100 ? last.stretch : 100;
     $('stats').textContent =
       'Speed ' + (v / 1000 * 3.6).toFixed(1) + ' km/h (' + Math.round(v) + ' mm/s)' +
       ' · column ' + (period ? period.toFixed(1) + ' ms' : '–') +
       ' · burst ' + (burst ? burst.toFixed(1) + ' ms' : '–') +
+      ' · stretch ' + stretch + '%' +
       ' · ' + cols.length + ' columns, ' + over + ' overruns, ' + skipped + ' skipped, ' + lost + ' lost';
   }
 

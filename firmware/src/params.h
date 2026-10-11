@@ -44,6 +44,14 @@ struct Settings {
   // Blank columns between printed characters, 0..FONT_MAX_SPACING. Applies
   // to messages queued from then on, and the default text.
   uint32_t letter_spacing;
+
+  // Stretching: at speed, columns are widened so each takes at least this
+  // long to cross. 0 = never stretch.
+  uint32_t min_column_ms;
+
+  // The most a column is widened, as a percentage of its normal width.
+  // 100-1000.
+  uint32_t max_stretch_pct;
 };
 
 void params_begin();

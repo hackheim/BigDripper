@@ -15,6 +15,8 @@ static const Settings DEFAULTS = {
     1000,  // trace_gap_ms
     10,    // test_line_spacing
     FONT_SPACING,  // letter_spacing
+    0,     // min_column_ms
+    300,   // max_stretch_pct
 };
 
 static Preferences prefs;
@@ -36,6 +38,8 @@ void params_begin() {
   current.trace_gap_ms = prefs.getUInt("tracegapms", DEFAULTS.trace_gap_ms);
   current.test_line_spacing = prefs.getUInt("testspacing", DEFAULTS.test_line_spacing);
   current.letter_spacing = prefs.getUInt("letterspace", DEFAULTS.letter_spacing);
+  current.min_column_ms = prefs.getUInt("mincolms", DEFAULTS.min_column_ms);
+  current.max_stretch_pct = prefs.getUInt("maxstretch", DEFAULTS.max_stretch_pct);
 
   // Whatever an older firmware saved has to be usable by this one.
   if (params_check(current) != nullptr) {
@@ -73,6 +77,8 @@ void params_set(const Settings &s) {
   prefs.putUInt("tracegapms", s.trace_gap_ms);
   prefs.putUInt("testspacing", s.test_line_spacing);
   prefs.putUInt("letterspace", s.letter_spacing);
+  prefs.putUInt("mincolms", s.min_column_ms);
+  prefs.putUInt("maxstretch", s.max_stretch_pct);
   xSemaphoreGive(params_mutex);
 }
 
@@ -85,5 +91,7 @@ drip::Params params_to_engine(const Settings &s) {
   p.trace_gap_us = (drip::Micros)s.trace_gap_ms * 1000;
   p.line_spacing = (int32_t)s.test_line_spacing;
   p.message_pause_us = (drip::Micros)s.print_pause_ms * 1000;
+  p.min_column_us = (drip::Micros)s.min_column_ms * 1000;
+  p.max_stretch_pct = s.max_stretch_pct;
   return p;
 }

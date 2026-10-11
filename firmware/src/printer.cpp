@@ -157,6 +157,10 @@ static void report(const drip::Engine &engine, const drip::StepResult &r, drip::
     }
     const drip::SpeedEstimator &speed = engine.speed();
     rec.counts_per_s = speed.valid() ? 1e6f / speed.us_per_count() : 0;
+    if (column >= 0) {
+      int32_t base = engine.params().counts_per_column;
+      rec.stretch_pct = (uint16_t)(engine.column_width() * 100 / (base > 0 ? base : 1));
+    }
     history.push(rec);
 
     if (column >= 0 && now - last_log >= LOG_INTERVAL_US) {

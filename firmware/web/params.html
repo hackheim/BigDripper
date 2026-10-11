@@ -27,6 +27,11 @@ button{font-size:1.2em;padding:.5em 1.5em;margin-top:1.5em}
 <input type="number" name="burst_duty_pct" min="5" max="95"></label>
 <label>Min column burst (ms)
 <input type="number" name="min_burst_ms" min="1"></label>
+<label>Min column time (ms, 0 = never stretch). At speed, columns get wider so
+each takes at least this long, and text stretches instead of the valves falling behind.
+<input type="number" name="min_column_ms" min="0"></label>
+<label>Max stretch (% of normal column width, 100-1000)
+<input type="number" name="max_stretch_pct" min="100" max="1000"></label>
 <label>Trace delay between bursts (ms)
 <input type="number" name="trace_gap_ms" min="0"></label>
 <button type="submit">Save</button>
