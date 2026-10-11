@@ -1,58 +1,57 @@
 #pragma once
 #include <Arduino.h>
+#include "drip/params.h"
 
 // Tunable settings, persisted to NVS via the Preferences library so they
 // survive a reboot. Call params_begin() once from setup(), before anything
-// else on either core reads or writes a parameter.
+// reads them.
+//
+// They're read and written as a whole: params_check() a changed copy, then
+// params_set() it, so a rejected form never leaves half of it saved and the
+// print engine never sees a mix of old and new values.
+
+struct Settings {
+  // mm of carriage travel per encoder detent. Calibrates encoder position to
+  // a physical distance; not used by the print engine yet.
+  float scale_mm_per_detent;
+
+  // Longest text the queue accepts, in printed glyphs (font_glyph_count()).
+  uint32_t max_text_len;
+
+  // Pause between one printed text finishing and the next one starting.
+  uint32_t print_pause_ms;
+
+  // Encoder detents per printed column. No field on the settings page yet.
+  uint32_t clicks_per_column;
+
+  // Ceiling on how long a column's coils stay open, and the Trace pulse.
+  uint32_t column_burst_ms;
+
+  // Percent of the measured column period the burst targets, so dots don't
+  // smear together at speed. 5-95.
+  uint32_t burst_duty_pct;
+
+  // Floor on burst length, below which the valves don't reliably open.
+  // 1 ms up to column_burst_ms.
+  uint32_t min_burst_ms;
+
+  // Trace only: how long every coil stays closed between pulses.
+  uint32_t trace_gap_ms;
+
+  // Lines only: a full column every this many columns. 1 = every column.
+  uint32_t test_line_spacing;
+};
 
 void params_begin();
 
-// mm of carriage travel per encoder detent. Calibrates encoder position to a
-// physical distance so printed text is neither stretched nor compressed;
-// consumed by the (future) print engine, not by anything in this firmware
-// yet.
-float params_get_scale_mm_per_detent();
-void params_set_scale_mm_per_detent(float v);
+Settings params_get();
 
-// Encoder detents per printed pixel column. Governs how fast turning the
-// wheel scans across the currently printing text: the print engine advances
-// one font column every params_get_clicks_per_column() detents.
-uint32_t params_get_clicks_per_column();
-void params_set_clicks_per_column(uint32_t v);
+// nullptr if `s` is fine to save, otherwise why not, fit to show a user.
+const char *params_check(const Settings &s);
 
-// Ceiling on how long a column's coils stay energized once the scan lands on
-// it, in milliseconds. The print engine fires a burst no longer than this
-// (see params_get_burst_duty_pct() for how the actual burst is scaled down at
-// speed) rather than holding the coils on until the scan reaches the next
-// column.
-uint32_t params_get_column_burst_ms();
-void params_set_column_burst_ms(uint32_t v);
+// Saves `s`, which must have passed params_check(). Doesn't reach the print
+// engine by itself: see printer_set_params().
+void params_set(const Settings &s);
 
-// Percent of the measured column period the adaptive burst targets, so dots
-// don't smear together at speed. Clamped to params_get_min_burst_ms() /
-// params_get_column_burst_ms() by the print engine.
-uint32_t params_get_burst_duty_pct();
-void params_set_burst_duty_pct(uint32_t v);
-
-// Floor on burst length, in milliseconds, below which the valves don't
-// reliably open. Must be <= params_get_column_burst_ms().
-uint32_t params_get_min_burst_ms();
-void params_set_min_burst_ms(uint32_t v);
-
-// Debug trace mode only: how long all coils stay off between bursts, in
-// milliseconds. The burst itself uses params_get_column_burst_ms().
-uint32_t params_get_trace_gap_ms();
-void params_set_trace_gap_ms(uint32_t v);
-
-// Test pattern only: a vertical line is printed every this many columns.
-// 1 = a line on every column.
-uint32_t params_get_test_line_spacing();
-void params_set_test_line_spacing(uint32_t v);
-
-// Longest text the queue will accept, in characters.
-size_t params_get_max_text_len();
-void params_set_max_text_len(size_t v);
-
-// Pause between one printed text finishing and the next one starting.
-uint32_t params_get_print_pause_ms();
-void params_set_print_pause_ms(uint32_t v);
+// What the print engine needs out of `s`.
+drip::Params params_to_engine(const Settings &s);

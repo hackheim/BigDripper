@@ -1,4 +1,6 @@
 #include "console_preview.h"
+#include "font.h"
+#include "mode.h"
 
 #if defined(CONSOLE_PREVIEW) || defined(CONSOLE_PREVIEW_DRY_RUN)
 
@@ -21,14 +23,14 @@ enum class ItemKind : uint8_t { Column, Message, Mode, Skipped };
 struct Item {
   ItemKind kind;
   uint16_t bits;      // Column
-  int32_t n;          // Skipped: column count. Mode: PrintMode.
+  int32_t n;          // Skipped: column count. Mode: drip::Mode.
   uint32_t dropped;   // lines dropped just before this one
   char text[48];      // Message, truncated
 };
 
 static QueueHandle_t preview_queue = NULL;
 
-// Only the print engine (valve task) pushes, so this needs no lock. It's
+// Only the print task pushes, so this needs no lock. It's
 // carried by the next item that does fit, so the drop note lands exactly
 // where the gap in the picture is.
 static uint32_t pending_drops = 0;
@@ -50,7 +52,7 @@ void console_preview_column(uint16_t bits) {
   push(item);
 }
 
-void console_preview_message(const QueuedText &m, bool is_default) {
+void console_preview_message(const drip::MessageInfo &m, bool is_default) {
   Item item;
   item.kind = ItemKind::Message;
   // Cap the text so the font and flags always fit, backing off so a UTF-8
@@ -61,12 +63,12 @@ void console_preview_message(const QueuedText &m, bool is_default) {
     while (len > 0 && (m.text[len] & 0xC0) == 0x80) len--;
   }
   snprintf(item.text, sizeof(item.text), "%.*s [%s%s]%s", len, m.text.c_str(),
-           font_label(m.font), m.invert ? ", inverted" : "",
+           font_label((Font)m.font), m.invert ? ", inverted" : "",
            is_default ? " (default)" : "");
   push(item);
 }
 
-void console_preview_mode(PrintMode mode) {
+void console_preview_mode(drip::Mode mode) {
   Item item;
   item.kind = ItemKind::Mode;
   item.n = (int32_t)mode;
@@ -100,7 +102,7 @@ static void preview_task(void *arg) {
         line[16] = '\r';
         line[17] = '\n';
         // Blocks once the TX buffer is full, which is fine here: it only
-        // backs up this queue, never the valve task.
+        // backs up this queue, never the print task.
         Serial0.write((const uint8_t *)line, 18);
         break;
       }
@@ -108,7 +110,7 @@ static void preview_task(void *arg) {
         Serial0.printf("-- %s --\r\n", item.text);
         break;
       case ItemKind::Mode:
-        Serial0.printf("-- mode: %s --\r\n", mode_name((PrintMode)item.n));
+        Serial0.printf("-- mode: %s --\r\n", mode_name((drip::Mode)item.n));
         break;
       case ItemKind::Skipped:
         Serial0.printf("~~ skipped %ld ~~\r\n", (long)item.n);
@@ -136,8 +138,8 @@ void console_preview_begin() {
   Serial0.println("-- console preview: one line per column, COIL1 on the left --");
   Serial0.println("-- rotate 90 degrees anticlockwise to read --");
   preview_queue = xQueueCreate(PREVIEW_QUEUE_DEPTH, sizeof(Item));
-  // Priority 1, below the encoder task: it only ever waits on the queue or
-  // the UART, so IDLE0 keeps running and the watchdog stays fed.
+  // Priority 1: it only ever waits on the queue or the UART, so IDLE0
+  // keeps running and the watchdog stays fed.
   xTaskCreatePinnedToCore(preview_task, "preview", 3072, NULL, 1, NULL, PREVIEW_CORE);
 #endif
 }

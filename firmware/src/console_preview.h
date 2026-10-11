@@ -1,7 +1,6 @@
 #pragma once
 #include <Arduino.h>
-#include "mode.h"
-#include "text_queue.h"
+#include "drip/engine.h"
 
 // Bench preview of what the head prints (Ticket 7), chosen at compile time:
 //
@@ -12,10 +11,10 @@
 //                                 no valve opens in any mode.
 //
 // The `preview` and `preview-dry` envs in platformio.ini set these. In a
-// normal build every function here is an empty inline, so the print engine
+// normal build every function here is an empty inline, so the print task
 // calls them without #ifdefs and gets no task, queue or code from it.
 //
-// The print engine never writes to the UART itself: each call is a
+// The print task never writes to the UART itself: each call is a
 // zero-timeout push onto a FreeRTOS queue that a low-priority task on core 0
 // drains. A full queue drops the line (reported later as "!! dropped N
 // lines") instead of delaying the valves.
@@ -32,14 +31,14 @@ inline void console_preview_begin() {}
 // A column's coil bits (bit 15 = COIL1), as written to the valves.
 void console_preview_column(uint16_t bits);
 // A new message became current: "-- HELLO [Drip] --".
-void console_preview_message(const QueuedText &m, bool is_default);
+void console_preview_message(const drip::MessageInfo &m, bool is_default);
 // The toolbar mode changed: "-- mode: prime --".
-void console_preview_mode(PrintMode mode);
+void console_preview_mode(drip::Mode mode);
 // The encoder moved past n columns between two scans; they never fired.
 void console_preview_skipped(int32_t n);
 #else
 inline void console_preview_column(uint16_t) {}
-inline void console_preview_message(const QueuedText &, bool) {}
-inline void console_preview_mode(PrintMode) {}
+inline void console_preview_message(const drip::MessageInfo &, bool) {}
+inline void console_preview_mode(drip::Mode) {}
 inline void console_preview_skipped(int32_t) {}
 #endif

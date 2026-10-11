@@ -1,168 +1,84 @@
 #include "params.h"
 #include <Preferences.h>
+#include "encoder.h"
 
 // Used only until the /params page saves a value for the first time.
-static const float DEFAULT_SCALE_MM_PER_DETENT = 1.0f;
-static const size_t DEFAULT_MAX_TEXT_LEN = 64;
-static const uint32_t DEFAULT_PRINT_PAUSE_MS = 2000;
-static const uint32_t DEFAULT_CLICKS_PER_COLUMN = 100;
-static const uint32_t DEFAULT_COLUMN_BURST_MS = 20;
-static const uint32_t DEFAULT_TRACE_GAP_MS = 1000;
-static const uint32_t DEFAULT_BURST_DUTY_PCT = 50;
-static const uint32_t DEFAULT_MIN_BURST_MS = 4;
-static const uint32_t DEFAULT_TEST_LINE_SPACING = 10;
+static const Settings DEFAULTS = {
+    1.0f,  // scale_mm_per_detent
+    64,    // max_text_len
+    2000,  // print_pause_ms
+    100,   // clicks_per_column
+    20,    // column_burst_ms
+    50,    // burst_duty_pct
+    4,     // min_burst_ms
+    1000,  // trace_gap_ms
+    10,    // test_line_spacing
+};
 
 static Preferences prefs;
 static SemaphoreHandle_t params_mutex;
-
-static float scale_mm_per_detent;
-static size_t max_text_len;
-static uint32_t print_pause_ms;
-static uint32_t clicks_per_column;
-static uint32_t column_burst_ms;
-static uint32_t trace_gap_ms;
-static uint32_t burst_duty_pct;
-static uint32_t min_burst_ms;
-static uint32_t test_line_spacing;
+static Settings current;
 
 void params_begin() {
   params_mutex = xSemaphoreCreateMutex();
 
   // false = read/write. NVS keys are capped at 15 chars.
   prefs.begin("bigdripper", false);
-  scale_mm_per_detent = prefs.getFloat("scale", DEFAULT_SCALE_MM_PER_DETENT);
-  max_text_len = prefs.getUInt("maxlen", DEFAULT_MAX_TEXT_LEN);
-  print_pause_ms = prefs.getUInt("pausems", DEFAULT_PRINT_PAUSE_MS);
-  clicks_per_column = prefs.getUInt("clkpercol", DEFAULT_CLICKS_PER_COLUMN);
-  column_burst_ms = prefs.getUInt("burstms", DEFAULT_COLUMN_BURST_MS);
-  trace_gap_ms = prefs.getUInt("tracegapms", DEFAULT_TRACE_GAP_MS);
-  burst_duty_pct = prefs.getUInt("burstduty", DEFAULT_BURST_DUTY_PCT);
-  min_burst_ms = prefs.getUInt("minburstms", DEFAULT_MIN_BURST_MS);
-  test_line_spacing = prefs.getUInt("testspacing", DEFAULT_TEST_LINE_SPACING);
+  current.scale_mm_per_detent = prefs.getFloat("scale", DEFAULTS.scale_mm_per_detent);
+  current.max_text_len = prefs.getUInt("maxlen", DEFAULTS.max_text_len);
+  current.print_pause_ms = prefs.getUInt("pausems", DEFAULTS.print_pause_ms);
+  current.clicks_per_column = prefs.getUInt("clkpercol", DEFAULTS.clicks_per_column);
+  current.column_burst_ms = prefs.getUInt("burstms", DEFAULTS.column_burst_ms);
+  current.burst_duty_pct = prefs.getUInt("burstduty", DEFAULTS.burst_duty_pct);
+  current.min_burst_ms = prefs.getUInt("minburstms", DEFAULTS.min_burst_ms);
+  current.trace_gap_ms = prefs.getUInt("tracegapms", DEFAULTS.trace_gap_ms);
+  current.test_line_spacing = prefs.getUInt("testspacing", DEFAULTS.test_line_spacing);
+
+  // Whatever an older firmware saved has to be usable by this one.
+  if (params_check(current) != nullptr) {
+    log_w("saved settings invalid (%s), using defaults", params_check(current));
+    current = DEFAULTS;
+  }
 }
 
-float params_get_scale_mm_per_detent() {
+Settings params_get() {
   xSemaphoreTake(params_mutex, portMAX_DELAY);
-  float v = scale_mm_per_detent;
+  Settings s = current;
   xSemaphoreGive(params_mutex);
-  return v;
+  return s;
 }
 
-void params_set_scale_mm_per_detent(float v) {
-  xSemaphoreTake(params_mutex, portMAX_DELAY);
-  scale_mm_per_detent = v;
-  prefs.putFloat("scale", v);
-  xSemaphoreGive(params_mutex);
+const char *params_check(const Settings &s) {
+  if (s.max_text_len < 1 || s.max_text_len > 255) {
+    return "Max text length must be between 1 and 255.";
+  }
+  if (s.clicks_per_column < 1) return "Detents per column must be at least 1.";
+  return drip::params_validate(params_to_engine(s));
 }
 
-size_t params_get_max_text_len() {
+void params_set(const Settings &s) {
   xSemaphoreTake(params_mutex, portMAX_DELAY);
-  size_t v = max_text_len;
-  xSemaphoreGive(params_mutex);
-  return v;
-}
-
-void params_set_max_text_len(size_t v) {
-  xSemaphoreTake(params_mutex, portMAX_DELAY);
-  max_text_len = v;
-  prefs.putUInt("maxlen", (uint32_t)v);
-  xSemaphoreGive(params_mutex);
-}
-
-uint32_t params_get_print_pause_ms() {
-  xSemaphoreTake(params_mutex, portMAX_DELAY);
-  uint32_t v = print_pause_ms;
-  xSemaphoreGive(params_mutex);
-  return v;
-}
-
-void params_set_print_pause_ms(uint32_t v) {
-  xSemaphoreTake(params_mutex, portMAX_DELAY);
-  print_pause_ms = v;
-  prefs.putUInt("pausems", v);
+  current = s;
+  prefs.putFloat("scale", s.scale_mm_per_detent);
+  prefs.putUInt("maxlen", s.max_text_len);
+  prefs.putUInt("pausems", s.print_pause_ms);
+  prefs.putUInt("clkpercol", s.clicks_per_column);
+  prefs.putUInt("burstms", s.column_burst_ms);
+  prefs.putUInt("burstduty", s.burst_duty_pct);
+  prefs.putUInt("minburstms", s.min_burst_ms);
+  prefs.putUInt("tracegapms", s.trace_gap_ms);
+  prefs.putUInt("testspacing", s.test_line_spacing);
   xSemaphoreGive(params_mutex);
 }
 
-uint32_t params_get_clicks_per_column() {
-  xSemaphoreTake(params_mutex, portMAX_DELAY);
-  uint32_t v = clicks_per_column;
-  xSemaphoreGive(params_mutex);
-  return v;
-}
-
-void params_set_clicks_per_column(uint32_t v) {
-  xSemaphoreTake(params_mutex, portMAX_DELAY);
-  clicks_per_column = v;
-  prefs.putUInt("clkpercol", v);
-  xSemaphoreGive(params_mutex);
-}
-
-uint32_t params_get_column_burst_ms() {
-  xSemaphoreTake(params_mutex, portMAX_DELAY);
-  uint32_t v = column_burst_ms;
-  xSemaphoreGive(params_mutex);
-  return v;
-}
-
-void params_set_column_burst_ms(uint32_t v) {
-  xSemaphoreTake(params_mutex, portMAX_DELAY);
-  column_burst_ms = v;
-  prefs.putUInt("burstms", v);
-  xSemaphoreGive(params_mutex);
-}
-
-uint32_t params_get_trace_gap_ms() {
-  xSemaphoreTake(params_mutex, portMAX_DELAY);
-  uint32_t v = trace_gap_ms;
-  xSemaphoreGive(params_mutex);
-  return v;
-}
-
-void params_set_trace_gap_ms(uint32_t v) {
-  xSemaphoreTake(params_mutex, portMAX_DELAY);
-  trace_gap_ms = v;
-  prefs.putUInt("tracegapms", v);
-  xSemaphoreGive(params_mutex);
-}
-
-uint32_t params_get_burst_duty_pct() {
-  xSemaphoreTake(params_mutex, portMAX_DELAY);
-  uint32_t v = burst_duty_pct;
-  xSemaphoreGive(params_mutex);
-  return v;
-}
-
-void params_set_burst_duty_pct(uint32_t v) {
-  xSemaphoreTake(params_mutex, portMAX_DELAY);
-  burst_duty_pct = v;
-  prefs.putUInt("burstduty", v);
-  xSemaphoreGive(params_mutex);
-}
-
-uint32_t params_get_min_burst_ms() {
-  xSemaphoreTake(params_mutex, portMAX_DELAY);
-  uint32_t v = min_burst_ms;
-  xSemaphoreGive(params_mutex);
-  return v;
-}
-
-void params_set_min_burst_ms(uint32_t v) {
-  xSemaphoreTake(params_mutex, portMAX_DELAY);
-  min_burst_ms = v;
-  prefs.putUInt("minburstms", v);
-  xSemaphoreGive(params_mutex);
-}
-
-uint32_t params_get_test_line_spacing() {
-  xSemaphoreTake(params_mutex, portMAX_DELAY);
-  uint32_t v = test_line_spacing;
-  xSemaphoreGive(params_mutex);
-  return v;
-}
-
-void params_set_test_line_spacing(uint32_t v) {
-  xSemaphoreTake(params_mutex, portMAX_DELAY);
-  test_line_spacing = v;
-  prefs.putUInt("testspacing", v);
-  xSemaphoreGive(params_mutex);
+drip::Params params_to_engine(const Settings &s) {
+  drip::Params p;
+  p.counts_per_column = (int32_t)(s.clicks_per_column * ENCODER_COUNTS_PER_DETENT);
+  p.max_burst_us = (drip::Micros)s.column_burst_ms * 1000;
+  p.min_burst_us = (drip::Micros)s.min_burst_ms * 1000;
+  p.burst_duty_pct = s.burst_duty_pct;
+  p.trace_gap_us = (drip::Micros)s.trace_gap_ms * 1000;
+  p.line_spacing = (int32_t)s.test_line_spacing;
+  p.message_pause_us = (drip::Micros)s.print_pause_ms * 1000;
+  return p;
 }

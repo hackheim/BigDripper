@@ -1,31 +1,17 @@
 #pragma once
 #include <Arduino.h>
+#include "drip/types.h"
 
-// What the print engine is doing. Exactly one mode at a time: turning one on
-// turns the others off, and Off means nothing prints at all (valves closed,
-// text queue left where it is).
+// Names for the print engine's modes (drip::Mode) as the web page and
+// /status use them: "off", "prime", "trace", "lines", "text".
 //
-// Set by the web server (on WEB_CORE) and read every cycle by the print
-// engine (print_engine_run(), on VALVE_CORE), so it's a plain atomic rather
-// than mutex-protected like the rest of the shared state in this project.
-//
-// Starts as Text and isn't persisted, so a reboot always comes back printing
-// text with every valve closed -- in particular Prime never comes back on by
-// itself after a reset.
-enum class PrintMode {
-  Off,
-  Prime,  // hold every valve open, for flushing/priming the system
-  Trace,  // pulse every valve: column burst on, trace gap off, repeat
-  Lines,  // encoder-driven test pattern (test_pattern_bits())
-  Text,   // print the text queue
-};
+// The mode itself lives in the print engine; set it with printer_set_mode().
+// It starts as Text and isn't persisted, so a reboot always comes back
+// printing text with every valve closed -- in particular Prime never comes
+// back on by itself after a reset.
 
-PrintMode mode_get();
-void mode_set(PrintMode mode);
-
-// "off", "prime", "trace", "lines", "text" -- the names /mode and /status use.
-const char *mode_name(PrintMode mode);
+const char *mode_name(drip::Mode mode);
 
 // Inverse of mode_name(). Returns false (and leaves *out alone) for anything
 // else.
-bool mode_from_name(const String &name, PrintMode *out);
+bool mode_from_name(const String &name, drip::Mode *out);

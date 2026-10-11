@@ -1,5 +1,5 @@
 #include "wifi_text_input.h"
-#include "text_queue.h"
+#include "printer.h"
 #include "params.h"
 #include "mode.h"
 #include "font_data.h"
@@ -18,9 +18,8 @@ static const char *MDNS_HOSTNAME = "bigdripper";
 static const char *PARAMS_USER = "admin";
 static const char *PARAMS_PASSWORD = "letmeprint9";
 
-// This core is otherwise idle on this board (see example_valve_control.cpp's
-// core-assignment comment) and keeping HTTP off VALVE_CORE means it can never
-// jitter valve timing.
+// Off PRINT_CORE (printer.h), with WiFi itself, so HTTP can never jitter
+// valve timing.
 #define WEB_CORE 0
 
 static WebServer server(80);
@@ -300,36 +299,31 @@ static String json_escape(const String &s) {
 }
 
 // {"text":...,"font":"Drip bold","invert":false} for one message.
-static String message_json(const QueuedText &m) {
-  return "{\"text\":" + json_escape(m.text) + ",\"font\":" + json_escape(font_label(m.font)) +
+static String message_json(const drip::MessageInfo &m) {
+  return "{\"text\":" + json_escape(String(m.text.c_str())) +
+         ",\"font\":" + json_escape(font_label((Font)m.font)) +
          ",\"invert\":" + (m.invert ? "true" : "false") + "}";
 }
 
 // What /status returns, and what /mode and /lines/spacing reply with.
 // "current" is null during the pause between prints.
 static String status_json() {
-  QueuedText current = text_queue_current();
-  bool is_default = current.text.length() == 0 && text_queue_is_idle();
-  bool paused = current.text.length() == 0 && !is_default;
-  if (is_default) {
-    current = {String(TEXT_QUEUE_DEFAULT_TEXT), TEXT_QUEUE_DEFAULT_FONT, false};
-  }
+  drip::Status st = printer_status();
 
   String json = "{\"mode\":\"";
-  json += mode_name(mode_get());
+  json += mode_name(st.mode);
   json += "\",\"current\":";
-  json += paused ? String("null") : message_json(current);
+  json += st.paused ? String("null") : message_json(st.current);
   json += ",\"default\":";
-  json += is_default ? "true" : "false";
+  json += st.printing_default ? "true" : "false";
   json += ",\"paused\":";
-  json += paused ? "true" : "false";
+  json += st.paused ? "true" : "false";
   json += ",\"pending\":[";
-  std::vector<QueuedText> pending = text_queue_pending();
-  for (size_t i = 0; i < pending.size(); i++) {
+  for (size_t i = 0; i < st.pending.size(); i++) {
     if (i) json += ',';
-    json += message_json(pending[i]);
+    json += message_json(st.pending[i]);
   }
-  json += "],\"lines_spacing\":" + String(params_get_test_line_spacing());
+  json += "],\"lines_spacing\":" + String(params_get().test_line_spacing);
 #ifdef CONSOLE_PREVIEW_DRY_RUN
   // Only in dry-run builds (Ticket 7.2), so the page can say so.
   json += ",\"dry_run\":true";
@@ -367,7 +361,7 @@ static void handle_emoji_json() {
 
 static void handle_root() {
   String page = FPSTR(PAGE_HTML);
-  page.replace("%MAXLEN%", String(params_get_max_text_len()));
+  page.replace("%MAXLEN%", String(params_get().max_text_len));
   // Last, so user text in the status can't be mistaken for a placeholder.
   // '<' only occurs inside JSON strings, and escaping it there keeps a
   // queued "</script>" from ending the script block early.
@@ -384,74 +378,63 @@ static void handle_params_page() {
   if (!server.authenticate(PARAMS_USER, PARAMS_PASSWORD)) {
     return server.requestAuthentication();
   }
+  Settings s = params_get();
   String page = FPSTR(PARAMS_HTML);
-  page.replace("%SCALE%", String(params_get_scale_mm_per_detent(), 4));
-  page.replace("%MAXLEN%", String(params_get_max_text_len()));
-  page.replace("%PAUSEMS%", String(params_get_print_pause_ms()));
-  page.replace("%BURSTMS%", String(params_get_column_burst_ms()));
-  page.replace("%BURSTDUTY%", String(params_get_burst_duty_pct()));
-  page.replace("%MINBURSTMS%", String(params_get_min_burst_ms()));
-  page.replace("%TRACEGAPMS%", String(params_get_trace_gap_ms()));
+  page.replace("%SCALE%", String(s.scale_mm_per_detent, 4));
+  page.replace("%MAXLEN%", String(s.max_text_len));
+  page.replace("%PAUSEMS%", String(s.print_pause_ms));
+  page.replace("%BURSTMS%", String(s.column_burst_ms));
+  page.replace("%BURSTDUTY%", String(s.burst_duty_pct));
+  page.replace("%MINBURSTMS%", String(s.min_burst_ms));
+  page.replace("%TRACEGAPMS%", String(s.trace_gap_ms));
   server.send(200, "text/html; charset=utf-8", page);
 }
 
+// Reads whole-number form field `name` into *out, if it was sent. False if
+// it was sent but isn't a number >= 0.
+static bool arg_uint(const char *name, uint32_t *out) {
+  if (!server.hasArg(name)) return true;
+  String v = server.arg(name);
+  v.trim();
+  if (v.length() == 0) return false;
+  for (size_t i = 0; i < v.length(); i++) {
+    if (!isDigit(v[i])) return false;
+  }
+  *out = (uint32_t)v.toInt();
+  return true;
+}
+
+// Saves a new set of settings and hands them to the print engine, or
+// changes nothing and returns false (having sent the 400) if they don't
+// hold together.
+static bool apply_settings(const Settings &s) {
+  const char *err = params_check(s);
+  if (err != nullptr) {
+    server.send(400, "text/plain", err);
+    return false;
+  }
+  params_set(s);
+  printer_set_params(params_to_engine(s));
+  return true;
+}
+
+// Every field is read first (missing ones keep their saved value) and the
+// result checked as a whole, so a rejected form saves none of it.
 static void handle_params_set() {
   if (!server.authenticate(PARAMS_USER, PARAMS_PASSWORD)) {
     return server.requestAuthentication();
   }
+  Settings s = params_get();
   if (server.hasArg("scale")) {
-    params_set_scale_mm_per_detent(server.arg("scale").toFloat());
+    s.scale_mm_per_detent = server.arg("scale").toFloat();
   }
-  if (server.hasArg("maxlen")) {
-    long v = server.arg("maxlen").toInt();
-    if (v > 0) {
-      params_set_max_text_len((size_t)v);
-    }
+  if (!arg_uint("maxlen", &s.max_text_len) || !arg_uint("pausems", &s.print_pause_ms) ||
+      !arg_uint("burstms", &s.column_burst_ms) || !arg_uint("burstduty", &s.burst_duty_pct) ||
+      !arg_uint("minburstms", &s.min_burst_ms) || !arg_uint("tracegapms", &s.trace_gap_ms)) {
+    server.send(400, "text/plain", "Every field must be a whole number, 0 or more.");
+    return;
   }
-  if (server.hasArg("pausems")) {
-    long v = server.arg("pausems").toInt();
-    if (v >= 0) {
-      params_set_print_pause_ms((uint32_t)v);
-    }
-  }
-  if (server.hasArg("burstms")) {
-    long v = server.arg("burstms").toInt();
-    if (v >= 0) {
-      params_set_column_burst_ms((uint32_t)v);
-    }
-  }
-  // Duty and min-burst are validated together against the (possibly
-  // just-updated) max burst above, rather than independently like the fields
-  // above -- a min burst only makes sense relative to the current ceiling.
-  if (server.hasArg("burstduty") || server.hasArg("minburstms")) {
-    uint32_t max_burst_ms = params_get_column_burst_ms();
-    long duty = server.hasArg("burstduty") ? server.arg("burstduty").toInt()
-                                            : (long)params_get_burst_duty_pct();
-    long min_burst = server.hasArg("minburstms") ? server.arg("minburstms").toInt()
-                                                  : (long)params_get_min_burst_ms();
-    if (duty < 5 || duty > 95) {
-      server.send(400, "text/plain", "Burst duty must be between 5 and 95.");
-      return;
-    }
-    if (min_burst < 1 || min_burst > (long)max_burst_ms) {
-      server.send(400, "text/plain",
-                  "Min column burst must be between 1 and the max column burst (" +
-                      String(max_burst_ms) + " ms).");
-      return;
-    }
-    if (server.hasArg("burstduty")) {
-      params_set_burst_duty_pct((uint32_t)duty);
-    }
-    if (server.hasArg("minburstms")) {
-      params_set_min_burst_ms((uint32_t)min_burst);
-    }
-  }
-  if (server.hasArg("tracegapms")) {
-    long v = server.arg("tracegapms").toInt();
-    if (v >= 0) {
-      params_set_trace_gap_ms((uint32_t)v);
-    }
-  }
+  if (!apply_settings(s)) return;
   log_i("parameters updated");
   server.sendHeader("Location", "/params");
   server.send(303);
@@ -466,11 +449,9 @@ static void handle_set() {
     font_from_id(server.arg("font"), &font);
     // Only "1" inverts; missing (e.g. an older cached page) means normal.
     bool invert = server.arg("invert") == "1";
-    if (text_queue_push(t, font, invert)) {
-      log_i("queued \"%s\" in %s%s", t.c_str(), font_label(font), invert ? ", inverted" : "");
-    } else {
-      log_w("rejected \"%s\" (empty, too long, or queue full)", t.c_str());
-    }
+    EnqueueResult r = printer_enqueue(t, font, invert);
+    log_i("\"%s\" in %s%s: %s", t.c_str(), font_label(font), invert ? ", inverted" : "",
+          enqueue_result_name(r));
   }
   // 303 -> GET / so a page refresh doesn't resubmit the form.
   server.sendHeader("Location", "/");
@@ -481,19 +462,12 @@ static void handle_set() {
 // tapping at once can't flip each other back. The page works out "tap on the
 // green button -> off".
 static void handle_mode() {
-  PrintMode mode;
+  drip::Mode mode;
   if (!mode_from_name(server.arg("mode"), &mode)) {
     server.send(400, "text/plain", "mode must be one of off, prime, trace, lines, text.");
     return;
   }
-  mode_set(mode);
-  if (mode == PrintMode::Trace) {
-    log_i("mode: trace, pulsing all valves for %lu ms with %lu ms between bursts",
-          (unsigned long)params_get_column_burst_ms(),
-          (unsigned long)params_get_trace_gap_ms());
-  } else {
-    log_i("mode: %s", mode_name(mode));
-  }
+  printer_set_mode(mode);
   send_status();
 }
 
@@ -504,7 +478,9 @@ static void handle_lines_spacing() {
     server.send(400, "text/plain", "Line spacing must be at least 1 column.");
     return;
   }
-  params_set_test_line_spacing((uint32_t)v);
+  Settings s = params_get();
+  s.test_line_spacing = (uint32_t)v;
+  if (!apply_settings(s)) return;
   log_i("test pattern: vertical line every %lu columns", (unsigned long)v);
   send_status();
 }

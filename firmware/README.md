@@ -1,6 +1,6 @@
 # Firmware demo
 
-This code contains logic for controlling 16 valves and also reading input from a quadrature encoder. Valve control and quadrature logic is running on separate cores
+This code controls 16 valves from a quadrature encoder on the carriage. The print engine (`lib/drip_core`) runs in its own task on core 1 together with the encoder (hardware pulse counter) and burst timer interrupts; WiFi, the web server and the neopixels run on core 0. Built on Arduino 3 / ESP-IDF 5.5 (the pioarduino platform, pinned in `platformio.ini`).
 
 ## Building and flashing
 
