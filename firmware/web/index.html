@@ -1,6 +1,6 @@
 <!DOCTYPE html><html><head><meta charset="utf-8"><title>BigDripper</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="style.css">
 </head><body>
 <div id="bar">
 <button data-m="prime">Prime<small>OFF</small></button>
@@ -9,7 +9,7 @@
 <button data-m="text">Text<small>OFF</small></button>
 </div>
 <div id="dry">DRY RUN &mdash; valves disabled</div>
-<div id="offline">Not connected to BigDripper</div>
+<div id="offline">Not connected to BigDripper <button type="button" id="connect" hidden>Connect</button></div>
 <main>
 <form id="lines">
 <label>Vertical line every
@@ -70,8 +70,44 @@ doesn&rsquo;t have prints as a space.</p>
 <p id="stats"></p>
 </details>
 
-<p><a href="/params">Settings</a></p>
+<details id="settings">
+<summary>Settings</summary>
+<form id="unlock">
+<label>Settings password
+<input type="password" id="password" autocomplete="current-password"></label>
+<button type="submit">Unlock</button>
+</form>
+<form id="sf" hidden>
+<label>Scale (mm of travel per encoder detent)
+<input type="text" inputmode="decimal" name="scale_mm_per_detent"></label>
+<label>Encoder detents per printed column
+<input type="number" name="clicks_per_column" min="1"></label>
+<label>Letter spacing (blank columns between characters, 0-8)
+<input type="number" name="letter_spacing" min="0" max="8"></label>
+<label>Max text length (printed characters, emoji count as 1)
+<input type="number" name="max_text_len" min="1" max="255"></label>
+<label>Pause between prints (ms)
+<input type="number" name="print_pause_ms" min="0"></label>
+<label>Max column burst (ms)
+<input type="number" name="column_burst_ms" min="1"></label>
+<label>Burst duty (% of column period, 5-95)
+<input type="number" name="burst_duty_pct" min="5" max="95"></label>
+<label>Min column burst (ms)
+<input type="number" name="min_burst_ms" min="1"></label>
+<label>Min column time (ms, 0 = never stretch). At speed, columns get wider so
+each takes at least this long, and text stretches instead of the valves falling behind.
+<input type="number" name="min_column_ms" min="0"></label>
+<label>Max stretch (% of normal column width, 100-1000)
+<input type="number" name="max_stretch_pct" min="100" max="1000"></label>
+<label>Trace delay between bursts (ms)
+<input type="number" name="trace_gap_ms" min="0"></label>
+<button type="submit">Save</button>
+</form>
+<p id="smsg"></p>
+</details>
 </main>
-<script src="/app.js"></script>
-<script src="/monitor.js"></script>
+<script src="transport.js"></script>
+<script src="app.js"></script>
+<script src="monitor.js"></script>
+<script src="settings.js"></script>
 </body></html>

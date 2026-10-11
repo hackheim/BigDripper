@@ -1,5 +1,7 @@
 #include <Arduino.h>
 #include <Adafruit_NeoPixel.h>
+#include "api.h"
+#include "ble.h"
 #include "console_preview.h"
 #include "params.h"
 #include "printer.h"
@@ -8,7 +10,8 @@
 // What runs where. Arduino's loopTask (setup()/loop()) is pinned to core 1,
 // which is also PRINT_CORE (printer.h): the print engine, the encoder and
 // burst timer interrupts. Everything that can be slow or bursty goes on
-// core 0: WiFi and the web server, the neopixels, the console preview.
+// core 0: WiFi and the web server, Bluetooth, the neopixels, the console
+// preview.
 #define BACKGROUND_CORE 0
 
 const int NUM_NEOPIXEL_STRIPS = 4;
@@ -159,7 +162,10 @@ void setup() {
   // stack-hungry part.
   xTaskCreatePinnedToCore(neopixel_task, "neopixel", 4096, NULL, 1, NULL, BACKGROUND_CORE);
 
+  // The API, then the two ways to reach it.
+  api_begin();
   web_begin();
+  ble_begin();
 }
 
 void loop() {

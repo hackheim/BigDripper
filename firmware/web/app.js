@@ -1,6 +1,6 @@
 // Main page: mode toolbar, now printing / queue, adding text. Talks to the
-// JSON API (API.md), and keeps up to date from its event stream
-// (/api/events): status changes, the print task's history and a clock.
+// board through Board (transport.js), and keeps up to date from its event
+// stream: status changes, the print task's history and a clock.
 //
 // The history is kept here, in Drip.history, for the live view
 // (monitor.js) to draw.
@@ -45,62 +45,41 @@ function draw(s) {
 }
 function label(m) { return ' · ' + m.font + (m.invert ? ' · inverted' : ''); }
 
-// --- API ------------------------------------------------------------------------
-
-// GET, or POST `body` as JSON. Resolves with the parsed reply; rejects with
-// the API's error message (or a generic one if the board isn't reachable).
-function api(path, body) {
-  var opts = body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
-                  : { cache: 'no-store' };
-  return fetch(path, opts).then(function (r) {
-    return r.json().catch(function () { return {}; }).then(function (j) {
-      if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
-      return j;
-    });
-  }, function () { throw new Error('Not connected to BigDripper.'); });
-}
+// --- Commands -------------------------------------------------------------------
 
 function say(text) { $('msg').textContent = text || ''; }
 
 btns.forEach(function (b) {
   b.onclick = function () {
-    api('/api/mode', { mode: S && b.dataset.m == S.mode ? 'off' : b.dataset.m }).then(draw, function (e) { say(e.message); });
+    Board.call('mode', { mode: S && b.dataset.m == S.mode ? 'off' : b.dataset.m }).then(draw, function (e) { say(e.message); });
   };
 });
 $('lines').onsubmit = function (e) {
   e.preventDefault(); $('spacing').blur();
-  api('/api/lines', { spacing: Number($('spacing').value) }).then(draw, function (e) { say(e.message); });
+  Board.call('lines', { spacing: Number($('spacing').value) }).then(draw, function (e) { say(e.message); });
 };
 
 // --- Connection -------------------------------------------------------------------
 //
-// The event stream, reconnected by the browser on its own. Anything that
-// arrives counts as a sign of life; a clock event comes every 2 s, so 5 s of
-// silence means we've lost the board.
+// Anything that arrives counts as a sign of life; a clock event comes every
+// 2 s, so 5 s of silence means we've lost the board. Over Bluetooth the
+// banner has a button to pick the board.
 
-var lastHeard = 0;
+var lastHeard = 0, emojiLoaded = false;
 function heard() { lastHeard = Date.now(); $('offline').style.display = 'none'; }
-setInterval(function () { if (Date.now() - lastHeard > 5000) $('offline').style.display = 'block'; }, 1000);
-
-function connect() {
-  if (!window.EventSource) {
-    // No event stream: poll the status instead (no live view).
-    (function poll() { api('/api/status').then(function (s) { heard(); draw(s); }, function () {}).then(function () { setTimeout(poll, 1500); }); })();
-    return;
-  }
-  var es = new EventSource('/api/events');
-  es.addEventListener('status', function (e) { heard(); draw(JSON.parse(e.data)); });
-  es.addEventListener('history', function (e) { heard(); Drip.batch(JSON.parse(e.data)); });
-  es.addEventListener('clock', function (e) { heard(); Drip.clock(JSON.parse(e.data).now); });
-  es.onopen = function () { heard(); Drip.catchUp(); };
+function offline() { $('offline').style.display = 'block'; }
+setInterval(function () { if (Date.now() - lastHeard > 5000) offline(); }, 1000);
+if (Board.kind == 'ble') {
+  $('connect').hidden = false;
+  $('connect').onclick = function () { Board.pick().catch(function () {}); };
 }
 
 // --- History ----------------------------------------------------------------------
 //
 // Records from the print task, in sequence order, as objects. Stream batches
 // are applied in order; if one starts past where we've got to (a dropped
-// event, a reconnect) the missing ones are fetched from /api/history, and only
-// what the board itself no longer has is marked as lost.
+// event, a reconnect) the missing ones are fetched with a history request,
+// and only what the board itself no longer has is marked as lost.
 
 var KINDS = ['coils', 'skipped', 'mode', 'message_started', 'message_finished'];
 var MODES = ['off', 'prime', 'trace', 'lines', 'text'];
@@ -131,7 +110,7 @@ var Drip = {
     if (this.fetching) return;
     var self = this;
     this.fetching = true;
-    api('/api/history?since=' + (this.next === null ? 0 : this.next)).then(function (h) {
+    Board.call('history', { since: this.next === null ? 0 : this.next }).then(function (h) {
       self.fetching = false;
       self.apply(h, true);
       var queued = self.pending; self.pending = [];
@@ -189,7 +168,7 @@ function count() {
 txt.oninput = function () { say(''); count(); };
 $('add').onsubmit = function (e) {
   e.preventDefault();
-  api('/api/queue', { text: txt.value, font: font, invert: inverted }).then(function (s) {
+  Board.call('queue', { text: txt.value, font: font, invert: inverted }).then(function (s) {
     txt.value = ''; sel = [0, 0]; say(''); draw(s);
   }, function (e) { say(e.message); });
 };
@@ -247,9 +226,27 @@ saved = null;
 try { saved = localStorage.getItem('invert'); } catch (e) {}
 setInvert(saved == '1');
 
-api('/api/emoji').then(function (list) {
-  list.forEach(function (e) { CODES.push(e.code.toLowerCase()); $('emoji').appendChild(emojiButton(e)); });
-  count();
-}, function () {});
-api('/api/status').then(function (s) { heard(); draw(s); }, function () {});
-connect();
+function loadEmoji() {
+  Board.call('emoji').then(function (list) {
+    if (emojiLoaded) return;
+    emojiLoaded = true;
+    list.forEach(function (e) { CODES.push(e.code.toLowerCase()); $('emoji').appendChild(emojiButton(e)); });
+    count();
+  }, function () {});
+}
+
+// Last, once everything above exists: the first events can come straight away.
+Board.listen({
+  status: function (s) { heard(); draw(s); },
+  history: function (b) { heard(); Drip.batch(b); },
+  clock: function (now) { heard(); Drip.clock(now); },
+  close: offline,
+  // On every (re)connect: the status, the history missed, the emoji once.
+  open: function () {
+    heard();
+    Board.call('status').then(draw, function () {});
+    Drip.catchUp();
+    if (!emojiLoaded) loadEmoji();
+    if (window.Settings) Settings.connected();
+  },
+});

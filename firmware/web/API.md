@@ -1,22 +1,37 @@
-# BigDripper web API
+# BigDripper API
 
-Served by the board on its own access point (`BigDripper`, password `dripdrip1`) at `http://bigdripper.local/` (or `http://192.168.4.1/`). The web UI in this directory is embedded in the firmware at build time and uses only what's described here.
+The board's API, reachable two ways:
+
+- **HTTP**, on the board's own access point (`BigDripper`, password `dripdrip1`) at `http://bigdripper.local/` (or `http://192.168.4.1/`). The web UI in this directory is embedded in the firmware and served there.
+- **Bluetooth LE**, for the same web UI served from anywhere else over HTTPS, using Web Bluetooth (Chrome on Android and desktop; not iOS). The phone stays on its own network. See [Bluetooth](#bluetooth).
+
+Both carry the same operations (`src/api.h`). Each takes a JSON object of arguments and replies with a status code and a JSON body:
+
+| Operation | HTTP | Arguments | Reply |
+|---|---|---|---|
+| `status` | `GET /api/status` | | [Status](#status) |
+| `queue` | `POST /api/queue` | `text`, `font`, `invert` | Status |
+| `mode` | `POST /api/mode` | `mode` | Status |
+| `lines` | `POST /api/lines` | `spacing` | Status |
+| `settings` | `GET /api/settings` | | [Settings](#settings) (password) |
+| `save_settings` | `POST /api/settings` | any settings | Settings (password) |
+| `history` | `GET /api/history?since=N` | `since` | [History](#history) |
+| `emoji` | `GET /api/emoji` | | [Emoji](#other) |
 
 Conventions:
 
-- Replies are JSON, never cached (`Cache-Control: no-store`), except `/api/emoji`.
-- `POST` bodies are JSON objects, sent with `Content-Type: application/json`. Without that header the request isn't recognised and gets a 404.
-- Errors come back as `{"error": "Reason, fit to show a user."}` with status `400` (bad request), `401` (password needed), `404` (no such path) or `409` (the queue is full).
+- Over HTTP, replies are never cached (`Cache-Control: no-store`), except `/api/emoji`. `POST` bodies are JSON objects, sent with `Content-Type: application/json`. Without that header the request isn't recognised and gets a 404.
+- Errors come back as `{"error": "Reason, fit to show a user."}` with status `400` (bad request), `401` (settings password missing or wrong), `404` (no such operation or path) or `409` (the queue is full).
 - A request that fails changes nothing.
 - Every call goes through the print task (`src/printer.h`), so what a reply shows already reflects the request.
 
-`/api/settings` and `/params` need HTTP basic auth: user `admin`, password `letmeprint9`.
+`settings` and `save_settings` need the settings password, `letmeprint9`. Over HTTP, as basic auth with user `admin`. A wrong or missing one gets a 401 without `WWW-Authenticate`, so a browser doesn't show its own password box. Over Bluetooth, in the request's `auth` field.
 
 ## Status
 
 ### `GET /api/status`
 
-What the print engine is doing. Also the reply to `POST /api/queue`, `/api/mode` and `/api/lines`, and the `status` event on the stream.
+What the print engine is doing. Also the reply to `queue`, `mode` and `lines`, and the `status` event on the stream.
 
 ```json
 {
@@ -50,7 +65,7 @@ What the print engine is doing. Also the reply to `POST /api/queue`, `/api/mode`
 
 ## Commands
 
-### `POST /api/queue`
+### `queue` (`POST /api/queue`)
 
 ```json
 {"text": "HELLO :heart:", "font": "drip_bold", "invert": false}
@@ -62,7 +77,7 @@ Errors:
 - `400`: nothing to print, too long, or a bad field.
 - `409`: the queue is full (8 messages).
 
-### `POST /api/mode`
+### `mode` (`POST /api/mode`)
 
 ```json
 {"mode": "lines"}
@@ -70,7 +85,7 @@ Errors:
 
 Sets exactly that mode, so two phones setting the same one don't undo each other. Setting the mode it's already in does nothing. Replies with the status.
 
-### `POST /api/lines`
+### `lines` (`POST /api/lines`)
 
 ```json
 {"spacing": 5}
@@ -80,7 +95,7 @@ Lines mode's spacing, in columns. This is the one setting the main page may chan
 
 ## Settings
 
-### `GET /api/settings`
+### `settings` (`GET /api/settings`)
 
 ```json
 {
@@ -99,7 +114,7 @@ Lines mode's spacing, in columns. This is the one setting the main page may chan
 }
 ```
 
-### `POST /api/settings`
+### `save_settings` (`POST /api/settings`)
 
 Any subset of the fields above; missing ones keep their saved value. The result is checked as a whole: either everything is saved and handed to the print engine, or a `400` says why and nothing changes. Replies with all the settings.
 
@@ -117,7 +132,7 @@ Rules:
 
 The print task records everything it does into a ring of the last `history_size` records. Each record has a sequence number, one more than the previous, starting from 0 at boot.
 
-### `GET /api/history?since=N`
+### `history` (`GET /api/history?since=N`)
 
 Every record from sequence number `N` on, or as many as the board still has.
 
@@ -148,9 +163,7 @@ Each record is `[kind, at, value, bits, open_us, overrun, speed, stretch]`:
 
 ## Event stream
 
-### `GET /api/events`
-
-[Server-sent events](https://html.spec.whatwg.org/multipage/server-sent-events.html). Browsers reconnect by themselves.
+Over HTTP, `GET /api/events`: [server-sent events](https://html.spec.whatwg.org/multipage/server-sent-events.html). Browsers reconnect by themselves.
 
 | Event | Data |
 |---|---|
@@ -160,10 +173,45 @@ Each record is `[kind, at, value, bits, open_us, overrun, speed, stretch]`:
 
 A client keeps the `next` it has got to. If a `history` event's `first` is past that, events were dropped or the connection was lost for a while. Fetch `GET /api/history?since=next` to fill in what's missing; only that reply's `lost` is really gone. On connecting, a client fetches history itself; the stream only carries what's new from then on.
 
+Over Bluetooth the same events arrive as notifications; see below.
+
 ## Other
 
-| Path | |
+| | |
 |---|---|
-| `GET /api/emoji` | The emoji the fonts have: `[{"code": ":smile:", "width": 13, "columns": [...]}]`. Columns as stored, bit 15 = top row. |
-| `GET /`, `/style.css`, `/app.js`, `/monitor.js` | The main page. |
-| `GET /params` | The settings page (password). |
+| `emoji` (`GET /api/emoji`) | The emoji the fonts have: `[{"code": ":smile:", "width": 13, "columns": [...]}]`. Columns as stored, bit 15 = top row. |
+| `GET /`, `/style.css`, `/*.js` | The web UI. |
+| `GET /params` | Redirects to `/#settings` (the settings used to be a page of their own). |
+
+## Bluetooth
+
+The board advertises as `BigDripper` with one GATT service, `c44f5ed8-6e56-4c8b-ae22-7164774163b9`, which has two characteristics:
+
+| Characteristic | UUID | |
+|---|---|---|
+| request | `2edbd9b7-7914-4c4d-8ae1-97fb8b1dc19b` | Write (with response). Requests. |
+| events | `b6a173f9-9607-4151-8654-f814ffd5bdf6` | Notify. Replies and the event stream. |
+
+Up to 3 phones can be connected at once. There's no pairing: anyone in range can connect, as on the open parts of the HTTP API.
+
+Every write and every notification starts with one byte: the message type, with `0x80` set if the message continues in the next one. A message too big for one write or notification is split, and its pieces are joined in order. Each connection's messages never interleave. Writes carry at most 512 bytes, and notifications are cut to the connection's MTU.
+
+| Type | Direction | Content |
+|---|---|---|
+| `0` request | to the board | JSON `{"id": 7, "op": "queue", "args": {...}, "auth": "..."}`. `auth` is only needed for the settings operations. |
+| `1` reply | from the board | JSON `{"id": 7, "code": 200, "body": {...}}`: the request's `id`, the status code and body as over HTTP. |
+| `2` status | from the board | JSON, as `status`. Sent on subscribing and whenever it changes. |
+| `3` history | from the board | New history records, packed (below). |
+| `4` clock | from the board | int64 board time in microseconds, every 2 seconds. |
+
+Subscribe to events before sending requests: replies only go to a subscribed connection. As over HTTP, a client fetches what came before with the `history` operation, and the stream carries what's new.
+
+History events are packed, little endian: a 21-byte header, then 26 bytes per record, with the same fields as the JSON history:
+
+```
+header  u32 first, u32 next, u32 lost, u8 reset, i64 now
+record  u8 kind, u8 overrun, u16 bits, i32 value, i64 at,
+        i32 open_us (-1 = held), u32 speed, u16 stretch
+```
+
+`web/transport.js` is the reference client.

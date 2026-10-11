@@ -1,6 +1,6 @@
 # Firmware demo
 
-This code controls 16 valves from a quadrature encoder on the carriage. The print engine (`lib/drip_core`) runs in its own task on core 1 together with the encoder (hardware pulse counter) and burst timer interrupts; WiFi, the web server and the neopixels run on core 0. Built on Arduino 3 / ESP-IDF 5.5 (the pioarduino platform, pinned in `platformio.ini`).
+This code controls 16 valves from a quadrature encoder on the carriage. The print engine (`lib/drip_core`) runs in its own task on core 1 together with the encoder (hardware pulse counter) and burst timer interrupts; WiFi, the web server, Bluetooth and the neopixels run on core 0. Built on Arduino 3 / ESP-IDF 5.5 (the pioarduino platform, pinned in `platformio.ini`).
 
 ## Building and flashing
 
@@ -13,13 +13,21 @@ This code controls 16 valves from a quadrature encoder on the carriage. The prin
 ## Text input
 
 1. Connect to the BigDripper SSID and enter the password "dripdrip1"
-1. Go to http://bigdripper.local (fallback http://192.168.4.1) to queue text to print
-1. Go to http://bigdripper.local/params for scaling/length/pause settings (user "admin", password "letmeprint9")
+1. Go to http://bigdripper.local (fallback http://192.168.4.1) to queue text to print. Or, without joining the access point, open the web UI from an HTTPS host in Chrome on Android and tap "Connect" to reach the board over Bluetooth (see "Web UI" below)
+1. Settings (scaling, length, pause, ...) are at the bottom of the page, behind the password "letmeprint9"
 1. Each message prints in the font picked above the text box: Spleen (the original Spleen 8x16 font), Drip or Drip bold. Drip and Drip bold have A-Z, ÆØÅ, 0-9 and `. , ! ? - : '`; Spleen only has A-Z, 0-9 and space. Anything a font doesn't have prints as a space. The Invert button next to the fonts prints the message inverted: dry letters in a sprayed band, with 2 solid columns on each side. This uses a lot more water than normal text. Emoji are written as shortcodes (the web page has a button for each): `:smile:` `:sad:` `:big_smile:` `:neutral:` `:confused:` `:wink:` `:surprised:` `:tongue:` `:heart:` `:drop:` `:star:`. The length limit counts printed characters, so an emoji counts as one.
 
 ## Web UI
 
 The pages live in `web/` as plain HTML, CSS and JavaScript. `scripts/embed_web.py` runs before every build and gzips them into `src/generated/web_assets.h`, so the UI ships with the firmware and can't get out of step with it. `src/web.cpp` serves them, along with the JSON API they use, which is documented in `web/API.md`. That includes a server-sent event stream that keeps every open page up to date.
+
+The same API is also served over Bluetooth LE (`src/ble.cpp`), so the same page works from any HTTPS host through Web Bluetooth, in Chrome on Android or desktop (not iOS), and the phone keeps its own internet. `web/transport.js` picks the right transport: HTTP when the page came from the board, Bluetooth anywhere else. Both go through `src/api.cpp`, so the operations are the same either way.
+
+To try the Bluetooth version without hosting it anywhere, serve `web/` locally. `localhost` counts as secure, so Web Bluetooth works there:
+
+    python3 -m http.server -d web 8000
+    # desktop Chrome: http://localhost:8000
+    # Android Chrome over USB: adb reverse tcp:8000 tcp:8000, then http://localhost:8000 on the phone
 
 The main page has a "Live view" at the bottom, drawn from the print task's history. It shows the coils over time (or column by column, as they land on the ground) and speed and burst length below. Red marks show records that never reached the page, orange shows columns the wheel jumped over, and purple shows overruns.
 

@@ -54,3 +54,13 @@ canvas.plot{display:block;width:100%;background:#fafafa;border:1px solid #ddd;bo
 .legend{font-size:.8em;color:#555;display:flex;flex-wrap:wrap;gap:.2em 1em}
 .legend i{display:inline-block;width:10px;height:10px;margin-right:4px;vertical-align:middle}
 #stats{font-size:.85em;color:#333;font-variant-numeric:tabular-nums}
+
+/* Connect button in the offline banner (Bluetooth) */
+#offline button{margin-left:.6em;font-size:1em;padding:.2em .8em;min-height:36px}
+
+/* Settings */
+#settings summary{font-weight:bold;color:#555;margin:1.4em 0 .4em;cursor:pointer}
+#settings label{display:block;margin-top:1em;font-size:.95em}
+#settings input{display:block;width:100%;margin-top:.2em}
+#smsg{font-weight:bold;min-height:1.2em;color:#c0392b}
+#smsg.ok{color:#1e8e3e}
