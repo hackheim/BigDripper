@@ -28,6 +28,12 @@ The Drip glyphs are defined in `font_design/gen_font.py`, and the Spleen font's 
 
     sh font_design/host_test/run.sh
 
+## Print engine core
+
+`lib/drip_core/` is the print engine as plain C++ with no Arduino, FreeRTOS or hardware in it: modes, the text queue, speed estimation and the column firing strategy. The firmware tells it the encoder position and the time, and it answers with what to do with the coils and when to wake it next (`drip/types.h`). It builds on the host and has its own tests:
+
+    sh lib/drip_core/test/run.sh
+
 ## Console preview
 
 Check what the head prints at the bench, without water. Two extra build environments draw every column that fires on the serial console as one line of text; turn the wheel and the message scrolls by column by column.
