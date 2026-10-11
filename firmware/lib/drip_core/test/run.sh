@@ -7,5 +7,6 @@
 set -e
 here=$(dirname "$0")
 out=${TMPDIR:-/tmp}/bigdripper_core_test
-g++ -std=gnu++11 -Wall -Wextra -Werror -I"$here/../src" "$here/engine_test.cpp" "$here"/../src/drip/*.cpp -o "$out"
+g++ -std=gnu++11 -Wall -Wextra -Werror -I"$here/../src" "$here"/*_test.cpp "$here/test_main.cpp" \
+    "$here"/../src/drip/*.cpp -o "$out"
 "$out"

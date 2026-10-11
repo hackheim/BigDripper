@@ -40,6 +40,10 @@ struct Settings {
 
   // Lines only: a full column every this many columns. 1 = every column.
   uint32_t test_line_spacing;
+
+  // Blank columns between printed characters, 0..FONT_MAX_SPACING. Applies
+  // to messages queued from then on, and the default text.
+  uint32_t letter_spacing;
 };
 
 void params_begin();
@@ -50,7 +54,7 @@ Settings params_get();
 const char *params_check(const Settings &s);
 
 // Saves `s`, which must have passed params_check(). Doesn't reach the print
-// engine by itself: see printer_set_params().
+// engine by itself: see printer_set_settings().
 void params_set(const Settings &s);
 
 // What the print engine needs out of `s`.

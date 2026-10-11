@@ -1,0 +1,56 @@
+/* Main page. Mobile-first: a toolbar fixed to the top with one toggle per
+   mode, and everything else below it. */
+
+*{box-sizing:border-box}
+body{font-family:sans-serif;margin:0;background:#fff;color:#111;font-size:17px}
+#bar{position:sticky;top:0;z-index:1;display:flex;gap:4px;padding:4px;background:#222}
+#bar button{flex:1;min-width:0;min-height:56px;border:0;border-radius:6px;color:#fff;
+font-size:1em;font-weight:bold;line-height:1.2;padding:4px 0;background:#c0392b}
+#bar button[aria-pressed=true]{background:#1e8e3e}
+#bar small{display:block;font-size:.7em;font-weight:normal}
+#dry{display:none;background:#c0392b;color:#fff;text-align:center;padding:.4em;font-size:.9em;font-weight:bold}
+#offline{display:none;background:#f1c40f;color:#111;text-align:center;padding:.4em;font-size:.9em}
+main{max-width:480px;margin:0 auto;padding:0 16px 2em}
+h2{font-size:1em;margin:1.4em 0 .4em;color:#555}
+input{font-size:1.1em;padding:.5em;border:1px solid #888;border-radius:4px}
+input[type=text]{width:100%}
+input[type=number]{width:5em}
+main button{font-size:1.1em;padding:.6em 1.2em;margin-top:.5em;min-height:48px}
+ol{padding-left:1.5em;margin:0} li{margin:.3em 0;word-break:break-word}
+#cur{font-weight:bold;word-break:break-word}
+.empty{color:#888;font-style:italic;font-weight:normal}
+#lines{display:none;margin-top:1em}
+.hint{color:#555;font-size:.9em}
+code{background:#eee;padding:0 .2em}
+#fontrow{display:flex;gap:8px;margin:.4em 0}
+#fontrow button{min-width:0;min-height:44px;margin:0;padding:0 .3em;font-size:.95em;
+border:2px solid #2c3e91;background:#fff;color:#2c3e91}
+#fonts{display:flex;flex:3}
+#fonts button{flex:1}
+#fonts button+button{border-left:0}
+#fonts button:first-child{border-radius:6px 0 0 6px}
+#fonts button:last-child{border-radius:0 6px 6px 0}
+#fontrow button[aria-pressed=true]{background:#2c3e91;color:#fff}
+#invert{flex:1;border-radius:6px}
+#text.inv{background:#111;color:#fff}
+#text.bold{font-weight:bold}
+.font{color:#888;font-weight:normal}
+#left{font-size:.9em;color:#555;margin:.3em 0}
+#left.over{color:#c0392b;font-weight:bold}
+#emoji{display:flex;flex-wrap:wrap;gap:6px;margin:.4em 0}
+#emoji button{width:48px;height:48px;min-height:0;margin:0;padding:0;border:1px solid #888;border-radius:6px;background:#fff}
+#emoji canvas{width:32px;height:32px;display:block;margin:auto}
+#msg{color:#c0392b;font-weight:bold;min-height:1.2em;margin:.3em 0}
+
+/* Live view: coil timeline and speed graph */
+#live summary{font-weight:bold;color:#555;margin:1.4em 0 .4em;cursor:pointer}
+.tabs{display:flex;gap:4px;flex-wrap:wrap;margin:.3em 0}
+.tabs button{min-height:36px;margin:0;padding:0 .8em;font-size:.9em;border:1px solid #2c3e91;
+border-radius:6px;background:#fff;color:#2c3e91}
+.tabs button[aria-pressed=true]{background:#2c3e91;color:#fff}
+canvas.plot{display:block;width:100%;background:#fafafa;border:1px solid #ddd;border-radius:4px;margin:.3em 0;touch-action:pan-y}
+#coils{height:180px}
+#speed{height:110px}
+.legend{font-size:.8em;color:#555;display:flex;flex-wrap:wrap;gap:.2em 1em}
+.legend i{display:inline-block;width:10px;height:10px;margin-right:4px;vertical-align:middle}
+#stats{font-size:.85em;color:#333;font-variant-numeric:tabular-nums}

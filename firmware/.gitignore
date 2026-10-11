@@ -5,3 +5,4 @@
 .vscode/ipch
 .claude
 __pycache__/
+src/generated/

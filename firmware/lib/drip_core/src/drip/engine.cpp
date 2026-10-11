@@ -27,6 +27,14 @@ bool Engine::enqueue(Message m) {
   return true;
 }
 
+void Engine::set_default_text(Message m) {
+  if (m.columns.empty()) return;
+  // The scanner points into default_text_.columns, so stop scanning it
+  // before it's replaced; the next step starts it again.
+  if (scanning_message_ && !printing_queued_) scanning_message_ = false;
+  default_text_ = std::move(m);
+}
+
 StepResult Engine::step(Micros now, const Sample &encoder) {
   StepResult out;
   // Speed is a property of the bike, not the mode, so it's tracked

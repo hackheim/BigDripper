@@ -72,10 +72,18 @@ class Engine {
   // interrupts the default text right away, but never a queued one.
   bool enqueue(Message m);
 
+  // Replaces the text printed while the queue is empty (must have at least
+  // one column). If it's printing, it starts again from its first column
+  // on the next step, without firing until the wheel moves.
+  void set_default_text(Message m);
+
   // Runs the engine at `now`, with the encoder last seen at `encoder`.
   StepResult step(Micros now, const Sample &encoder);
 
   Status status() const;
+
+  // The current speed estimate, for telemetry.
+  const SpeedEstimator &speed() const { return speed_; }
 
  private:
   void enter(Mode mode, Micros now, const Sample &s, StepResult &out);

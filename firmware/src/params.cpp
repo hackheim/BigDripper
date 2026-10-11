@@ -1,6 +1,7 @@
 #include "params.h"
 #include <Preferences.h>
 #include "encoder.h"
+#include "font.h"
 
 // Used only until the /params page saves a value for the first time.
 static const Settings DEFAULTS = {
@@ -13,6 +14,7 @@ static const Settings DEFAULTS = {
     4,     // min_burst_ms
     1000,  // trace_gap_ms
     10,    // test_line_spacing
+    FONT_SPACING,  // letter_spacing
 };
 
 static Preferences prefs;
@@ -33,6 +35,7 @@ void params_begin() {
   current.min_burst_ms = prefs.getUInt("minburstms", DEFAULTS.min_burst_ms);
   current.trace_gap_ms = prefs.getUInt("tracegapms", DEFAULTS.trace_gap_ms);
   current.test_line_spacing = prefs.getUInt("testspacing", DEFAULTS.test_line_spacing);
+  current.letter_spacing = prefs.getUInt("letterspace", DEFAULTS.letter_spacing);
 
   // Whatever an older firmware saved has to be usable by this one.
   if (params_check(current) != nullptr) {
@@ -53,6 +56,7 @@ const char *params_check(const Settings &s) {
     return "Max text length must be between 1 and 255.";
   }
   if (s.clicks_per_column < 1) return "Detents per column must be at least 1.";
+  if (s.letter_spacing > FONT_MAX_SPACING) return "Letter spacing must be between 0 and 8 columns.";
   return drip::params_validate(params_to_engine(s));
 }
 
@@ -68,6 +72,7 @@ void params_set(const Settings &s) {
   prefs.putUInt("minburstms", s.min_burst_ms);
   prefs.putUInt("tracegapms", s.trace_gap_ms);
   prefs.putUInt("testspacing", s.test_line_spacing);
+  prefs.putUInt("letterspace", s.letter_spacing);
   xSemaphoreGive(params_mutex);
 }
 

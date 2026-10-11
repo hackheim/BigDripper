@@ -3,7 +3,7 @@
 #include "console_preview.h"
 #include "params.h"
 #include "printer.h"
-#include "wifi_text_input.h"
+#include "web.h"
 
 // What runs where. Arduino's loopTask (setup()/loop()) is pinned to core 1,
 // which is also PRINT_CORE (printer.h): the print engine, the encoder and
@@ -153,13 +153,13 @@ void setup() {
   // No-op in normal builds.
   console_preview_begin();
 
-  printer_begin(params_to_engine(params_get()));
+  printer_begin(params_get());
 
   // 4096-byte stack: it calls log_i, and the vsnprintf underneath is the
   // stack-hungry part.
   xTaskCreatePinnedToCore(neopixel_task, "neopixel", 4096, NULL, 1, NULL, BACKGROUND_CORE);
 
-  wifi_text_input_begin();
+  web_begin();
 }
 
 void loop() {

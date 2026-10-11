@@ -1,0 +1,37 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>BigDripper settings</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+body{font-family:sans-serif;max-width:480px;margin:2em auto;padding:0 1em}
+label{display:block;margin-top:1.2em}
+input{width:100%;font-size:1.1em;padding:.4em;box-sizing:border-box}
+button{font-size:1.2em;padding:.5em 1.5em;margin-top:1.5em}
+#msg{font-weight:bold;min-height:1.2em}
+#msg.err{color:#c0392b}
+#msg.ok{color:#1e8e3e}
+</style></head><body>
+<h1>Settings</h1>
+<form id="f">
+<label>Scale (mm of travel per encoder detent)
+<input type="text" inputmode="decimal" name="scale_mm_per_detent"></label>
+<label>Encoder detents per printed column
+<input type="number" name="clicks_per_column" min="1"></label>
+<label>Letter spacing (blank columns between characters, 0-8)
+<input type="number" name="letter_spacing" min="0" max="8"></label>
+<label>Max text length (printed characters, emoji count as 1)
+<input type="number" name="max_text_len" min="1" max="255"></label>
+<label>Pause between prints (ms)
+<input type="number" name="print_pause_ms" min="0"></label>
+<label>Max column burst (ms)
+<input type="number" name="column_burst_ms" min="1"></label>
+<label>Burst duty (% of column period, 5-95)
+<input type="number" name="burst_duty_pct" min="5" max="95"></label>
+<label>Min column burst (ms)
+<input type="number" name="min_burst_ms" min="1"></label>
+<label>Trace delay between bursts (ms)
+<input type="number" name="trace_gap_ms" min="0"></label>
+<button type="submit">Save</button>
+<p id="msg"></p>
+</form>
+<p><a href="/">&larr; Back</a></p>
+<script src="/params.js"></script>
+</body></html>

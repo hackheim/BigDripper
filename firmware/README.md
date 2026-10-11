@@ -17,6 +17,12 @@ This code controls 16 valves from a quadrature encoder on the carriage. The prin
 1. Go to http://bigdripper.local/params for scaling/length/pause settings (user "admin", password "letmeprint9")
 1. Each message prints in the font picked above the text box: Spleen (the original Spleen 8x16 font), Drip or Drip bold. Drip and Drip bold have A-Z, ÆØÅ, 0-9 and `. , ! ? - : '`; Spleen only has A-Z, 0-9 and space. Anything a font doesn't have prints as a space. The Invert button next to the fonts prints the message inverted: dry letters in a sprayed band, with 2 solid columns on each side. This uses a lot more water than normal text. Emoji are written as shortcodes (the web page has a button for each): `:smile:` `:sad:` `:big_smile:` `:neutral:` `:confused:` `:wink:` `:surprised:` `:tongue:` `:heart:` `:drop:` `:star:`. The length limit counts printed characters, so an emoji counts as one.
 
+## Web UI
+
+The pages live in `web/` as plain HTML, CSS and JavaScript. `scripts/embed_web.py` runs before every build and gzips them into `src/generated/web_assets.h`, so the UI ships with the firmware and can't get out of step with it. `src/web.cpp` serves them, along with the JSON API they use, which is documented in `web/API.md`. That includes a server-sent event stream that keeps every open page up to date.
+
+The main page has a "Live view" at the bottom, drawn from the print task's history. It shows the coils over time (or column by column, as they land on the ground) and speed and burst length below. Red marks show records that never reached the page, orange shows columns the wheel jumped over, and purple shows overruns.
+
 ## Font
 
 The Drip glyphs are defined in `font_design/gen_font.py`, and the Spleen font's bitmaps in `font_design/spleen_8x16.py`. After changing it, regenerate the preview and the firmware tables from this directory:

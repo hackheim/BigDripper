@@ -1,4 +1,5 @@
 #include "printer.h"
+#include <atomic>
 #include <utility>
 #include "esp_timer.h"
 #include "coils.h"
@@ -20,7 +21,8 @@ static const size_t MAX_BYTES_PER_GLYPH = 16;
 // `done`, and reads the answer from the same struct.
 struct Request {
   enum Kind { Enqueue, SetMode, SetParams, GetStatus } kind;
-  drip::Message message;  // Enqueue
+  drip::Message message;  // Enqueue; SetParams: new default text if has_default
+  bool has_default = false;
   drip::Mode mode;        // SetMode
   drip::Params params;    // SetParams
   bool ok = false;        // Enqueue: queued
@@ -29,8 +31,20 @@ struct Request {
 };
 
 static QueueHandle_t requests = nullptr;  // of Request*
+
+static History history;
+static std::atomic<uint32_t> status_version{0};
+
+static void bump_status() {
+  status_version.fetch_add(1, std::memory_order_relaxed);
+}
 static TaskHandle_t print_task_handle = nullptr;
-static drip::Params initial_params;
+static Settings initial_settings;
+
+// Letter spacing the default text was last rendered with. Only touched by
+// printer_begin() and printer_set_settings(), which only the web server
+// calls, from its one task.
+static uint32_t default_spacing = FONT_SPACING;
 
 static void call(Request &r) {
   r.done = xSemaphoreCreateBinary();
@@ -41,12 +55,12 @@ static void call(Request &r) {
   vSemaphoreDelete(r.done);
 }
 
-static drip::Message make_message(const String &text, Font font, bool invert) {
+static drip::Message make_message(const String &text, Font font, bool invert, uint32_t spacing) {
   drip::Message m;
   m.info.text = text.c_str();
   m.info.font = (uint8_t)font;
   m.info.invert = invert;
-  m.columns = font_render(text, font, invert);
+  m.columns = font_render(text, font, invert, (int)spacing);
   return m;
 }
 
@@ -56,12 +70,16 @@ static void handle(drip::Engine &engine, Request &r) {
   switch (r.kind) {
     case Request::Enqueue:
       r.ok = engine.enqueue(std::move(r.message));
+      bump_status();
       break;
     case Request::SetMode:
       engine.set_mode(r.mode);
+      bump_status();
       break;
     case Request::SetParams:
       engine.set_params(r.params);
+      if (r.has_default) engine.set_default_text(std::move(r.message));
+      bump_status();
       break;
     case Request::GetStatus:
       r.status = engine.status();
@@ -70,42 +88,80 @@ static void handle(drip::Engine &engine, Request &r) {
   xSemaphoreGive(r.done);
 }
 
-// Console preview and logging. Logging is compiled out unless
+static void record(Record::Kind kind, drip::Micros at, int32_t value) {
+  Record rec = {};
+  rec.kind = kind;
+  rec.at_us = at;
+  rec.value = value;
+  history.push(rec);
+}
+
+// History, console preview and logging. Logging is compiled out unless
 // CORE_DEBUG_LEVEL is raised, and capped so a fast spin can't back up the
 // UART into this task.
 static void report(const drip::Engine &engine, const drip::StepResult &r, drip::Micros now) {
   static const drip::Micros LOG_INTERVAL_US = 50000;
   static drip::Micros last_log = 0;
+  bool overrun = false;
+  int32_t column = -1;
 
   for (int i = 0; i < r.event_count; i++) {
     const drip::Event &e = r.events[i];
     switch (e.kind) {
       case drip::Event::ModeChanged:
+        record(Record::ModeChanged, now, e.value);
+        bump_status();
         console_preview_mode((drip::Mode)e.value);
         log_i("mode: %s", mode_name((drip::Mode)e.value));
         break;
       case drip::Event::MessageStarted: {
+        record(Record::MessageStarted, now, e.value);
+        bump_status();
         drip::MessageInfo info = engine.status().current;
         console_preview_message(info, e.value == 1);
         log_i("now printing \"%s\"%s", info.text.c_str(), e.value ? " (default)" : "");
         break;
       }
       case drip::Event::MessageFinished:
+        record(Record::MessageFinished, now, 0);
+        bump_status();
         log_i("message done");
         break;
+      case drip::Event::Overrun:
+        overrun = true;
+        break;
       case drip::Event::ColumnFired:
+        column = e.value;
         console_preview_column(r.coils.bits);
-        if (now - last_log >= LOG_INTERVAL_US) {
-          last_log = now;
-          log_i("col=%ld bits=0x%04x burst_us=%lld overruns=%lu", (long)e.value, r.coils.bits,
-                (long long)(r.coils.close_at - now), (unsigned long)engine.status().overruns);
-        }
         break;
       case drip::Event::ColumnsSkipped:
+        record(Record::Skipped, now, e.value);
         console_preview_skipped(e.value);
         break;
-      case drip::Event::Overrun:
-        break;
+    }
+  }
+
+  if (r.has_coils) {
+    Record rec = {};
+    rec.kind = Record::Coils;
+    rec.at_us = now;
+    rec.value = column;
+    rec.bits = r.coils.bits;
+    rec.overrun = overrun;
+    if (r.coils.bits == 0) {
+      rec.open_us = 0;
+    } else if (r.coils.close_at == drip::NEVER) {
+      rec.open_us = Record::HELD;
+    } else {
+      rec.open_us = (uint32_t)(r.coils.close_at - now);
+    }
+    const drip::SpeedEstimator &speed = engine.speed();
+    rec.counts_per_s = speed.valid() ? 1e6f / speed.us_per_count() : 0;
+    history.push(rec);
+
+    if (column >= 0 && now - last_log >= LOG_INTERVAL_US) {
+      last_log = now;
+      log_i("col=%ld bits=0x%04x open_us=%lu", (long)column, rec.bits, (unsigned long)rec.open_us);
     }
   }
 }
@@ -115,8 +171,9 @@ static void print_task(void *) {
   coils_begin();
   encoder_begin(xTaskGetCurrentTaskHandle());
 
-  drip::Engine *engine =
-      new drip::Engine(make_message(DEFAULT_TEXT, DEFAULT_FONT, false), initial_params);
+  drip::Engine *engine = new drip::Engine(
+      make_message(DEFAULT_TEXT, DEFAULT_FONT, false, initial_settings.letter_spacing),
+      params_to_engine(initial_settings));
   log_i("print task on core %d", xPortGetCoreID());
 
   for (;;) {
@@ -146,8 +203,9 @@ static void print_task(void *) {
 
 // --- The API -----------------------------------------------------------------
 
-void printer_begin(const drip::Params &params) {
-  initial_params = params;
+void printer_begin(const Settings &settings) {
+  initial_settings = settings;
+  default_spacing = settings.letter_spacing;
   requests = xQueueCreate(8, sizeof(Request *));
   // Above everything else on its core. It blocks whenever it has nothing to
   // do, which is all the time at standstill.
@@ -158,7 +216,8 @@ EnqueueResult printer_enqueue(const String &text, Font font, bool invert) {
   // Rendered and checked here, on the caller's task, so the print task only
   // has to queue it. The length limit is in printed glyphs, so an emoji or
   // Æ counts as one; the byte cap is only a safety net against a huge POST.
-  size_t max_len = params_get().max_text_len;
+  Settings s = params_get();
+  size_t max_len = s.max_text_len;
   if (text.length() > MAX_BYTES_PER_GLYPH * max_len) return EnqueueResult::TooLong;
   size_t glyphs = font_glyph_count(text, font);
   if (glyphs == 0) return EnqueueResult::Empty;
@@ -166,7 +225,7 @@ EnqueueResult printer_enqueue(const String &text, Font font, bool invert) {
 
   Request r;
   r.kind = Request::Enqueue;
-  r.message = make_message(text, font, invert);
+  r.message = make_message(text, font, invert, s.letter_spacing);
   call(r);
   return r.ok ? EnqueueResult::Ok : EnqueueResult::QueueFull;
 }
@@ -188,10 +247,15 @@ void printer_set_mode(drip::Mode mode) {
   call(r);
 }
 
-void printer_set_params(const drip::Params &params) {
+void printer_set_settings(const Settings &settings) {
   Request r;
   r.kind = Request::SetParams;
-  r.params = params;
+  r.params = params_to_engine(settings);
+  if (settings.letter_spacing != default_spacing) {
+    r.message = make_message(DEFAULT_TEXT, DEFAULT_FONT, false, settings.letter_spacing);
+    r.has_default = true;
+    default_spacing = settings.letter_spacing;
+  }
   call(r);
 }
 
@@ -200,4 +264,16 @@ drip::Status printer_status() {
   r.kind = Request::GetStatus;
   call(r);
   return r.status;
+}
+
+History::Read printer_history(uint32_t since, Record *out, size_t max) {
+  return history.read(since, out, max);
+}
+
+uint32_t printer_history_head() {
+  return history.head();
+}
+
+uint32_t printer_status_version() {
+  return status_version.load(std::memory_order_relaxed);
 }

@@ -81,6 +81,16 @@ int main() {
   check(inv, "invert = edges + bitwise inverse in every font");
   check(font_render(String("HI"), Font::Drip, false) == r("HI"), "invert off is unchanged");
 
+  // Letter spacing: that many blank columns after every glyph.
+  {
+    std::vector<uint16_t> one = r("HI"), three = font_render(String("HI"), Font::Drip, false, 3);
+    bool ok = three.size() == one.size() + 2 * 2 && font_render(String("H"), Font::Drip, false, 0).size() ==
+                                                         r("H").size() - FONT_SPACING;
+    ok = ok && font_render(String("HI"), Font::Drip, false, 99).size() ==
+                   font_render(String("HI"), Font::Drip, false, FONT_MAX_SPACING).size();
+    check(ok, "letter spacing adds blank columns per glyph, clamped");
+  }
+
   Font f = Font::Drip;
   check(font_from_id("spleen", &f) && f == Font::Spleen && font_from_id("drip_bold", &f) && f == Font::DripBold &&
             font_from_id("drip", &f) && f == Font::Drip && !font_from_id("bogus", &f) && f == Font::Drip,

@@ -5,32 +5,10 @@
 // the encoder one count at a time and only calls step() when the last
 // StepResult::wake says to, the way the firmware will with the pulse
 // counter's thresholds and a timer.
-#include <cstdio>
-#include <vector>
+#include "check.h"
 #include "drip/engine.h"
 
 using namespace drip;
-
-static int failures = 0;
-static const char *current_test = "";
-
-#define CHECK(cond)                                                              \
-  do {                                                                           \
-    if (!(cond)) {                                                               \
-      printf("FAIL  %s: %s (line %d)\n", current_test, #cond, __LINE__);         \
-      failures++;                                                                \
-    }                                                                            \
-  } while (0)
-
-#define CHECK_EQ(a, b)                                                           \
-  do {                                                                           \
-    long long va = (long long)(a), vb = (long long)(b);                          \
-    if (va != vb) {                                                              \
-      printf("FAIL  %s: %s == %s (%lld vs %lld, line %d)\n", current_test, #a,   \
-             #b, va, vb, __LINE__);                                              \
-      failures++;                                                                \
-    }                                                                            \
-  } while (0)
 
 static Message msg(const char *text, std::vector<uint16_t> columns) {
   Message m;
@@ -149,23 +127,6 @@ struct Rig {
   }
   bool coils_open() const { return coils.bits != 0 && now < coils.close_at; }
 };
-
-typedef void (*TestFn)();
-struct Test {
-  const char *name;
-  TestFn fn;
-};
-static std::vector<Test> &tests() {
-  static std::vector<Test> t;
-  return t;
-}
-struct Register {
-  Register(const char *name, TestFn fn) { tests().push_back({name, fn}); }
-};
-#define TEST(name)                          \
-  static void name();                       \
-  static Register register_##name(#name, name); \
-  static void name()
 
 // --- Text --------------------------------------------------------------------
 
@@ -362,6 +323,32 @@ TEST(column_width_change_keeps_current_column) {
   CHECK_EQ(r.fired.back().column, 2);
 }
 
+TEST(default_text_replaced_while_printing) {
+  Rig r;
+  r.move(4 * 2);  // into column 1 of the default
+  r.clear();
+  r.e.set_default_text(msg(" X ", {0x0100, 0x0200}));
+  r.step();
+  CHECK_EQ(r.count(Event::MessageStarted), 1);
+  CHECK(r.fired.empty());
+  r.move(1);
+  CHECK_EQ(r.fired[0].bits, 0x0100);
+  CHECK(r.e.status().current.text == " X ");
+}
+
+TEST(default_text_replaced_while_queued_message_prints) {
+  Rig r;
+  r.enqueue("AB", AB_COLS);
+  r.move(4 + 1);  // AB column 1
+  r.clear();
+  r.e.set_default_text(msg(" X ", {0x0100}));
+  r.step();
+  CHECK_EQ(r.count(Event::MessageStarted), 0);  // AB carries on
+  r.move(4);
+  CHECK_EQ(r.fired.size(), 1);
+  if (!r.fired.empty()) CHECK_EQ(r.fired[0].bits, AB_COLS[2]);
+}
+
 // --- Modes -------------------------------------------------------------------
 
 TEST(same_mode_is_a_no_op) {
@@ -484,15 +471,4 @@ TEST(params_validation) {
   p = Params();
   p.counts_per_column = 0;
   CHECK(params_validate(p) != nullptr);
-}
-
-int main() {
-  for (const Test &t : tests()) {
-    current_test = t.name;
-    int before = failures;
-    t.fn();
-    printf("%s  %s\n", failures == before ? "ok  " : "FAIL", t.name);
-  }
-  printf("\n%d failure(s)\n", failures);
-  return failures ? 1 : 0;
 }

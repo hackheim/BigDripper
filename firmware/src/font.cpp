@@ -111,11 +111,13 @@ static void for_each_glyph(const String &text, Font font, Fn fn) {
 }
 
 // Glyph columns before the row-to-coil mapping, i.e. bit 15 = top row.
-static std::vector<uint16_t> render_rows(const String &text, Font font) {
+static std::vector<uint16_t> render_rows(const String &text, Font font, int spacing) {
+  if (spacing < 0) spacing = 0;
+  if (spacing > FONT_MAX_SPACING) spacing = FONT_MAX_SPACING;
   std::vector<uint16_t> out;
   for_each_glyph(text, font, [&](const FontGlyph *g) {
     out.insert(out.end(), g->columns, g->columns + g->width);
-    out.insert(out.end(), FONT_SPACING, 0);
+    out.insert(out.end(), spacing, 0);
   });
   return out;
 }
@@ -126,8 +128,8 @@ size_t font_glyph_count(const String &text, Font font) {
   return count;
 }
 
-std::vector<uint16_t> font_render(const String &text, Font font, bool invert) {
-  std::vector<uint16_t> cols = render_rows(text, font);
+std::vector<uint16_t> font_render(const String &text, Font font, bool invert, int spacing) {
+  std::vector<uint16_t> cols = render_rows(text, font, spacing);
   for (uint16_t &c : cols) c = to_coils(c);
   if (invert) {
     // to_coils() only permutes bits, so inverting after it is the same as
@@ -140,7 +142,7 @@ std::vector<uint16_t> font_render(const String &text, Font font, bool invert) {
 }
 
 void font_print_ascii(const String &text, Font font) {
-  std::vector<uint16_t> cols = render_rows(text, font);
+  std::vector<uint16_t> cols = render_rows(text, font, FONT_SPACING);
   String line;
   line.reserve(cols.size());
   for (int row = 0; row < FONT_HEIGHT; row++) {
