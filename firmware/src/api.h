@@ -12,6 +12,12 @@
 // Safe to call from any task except the print task. Calls are taken one at
 // a time.
 
+// In every status as "api". Bump it when an operation, its arguments or
+// replies change in a way an older page (or newer one) would get wrong: a
+// page hosted elsewhere (Cloudflare) can be a different version from the
+// firmware. Must match API_VERSION in web/app.js.
+const int API_VERSION = 1;
+
 // The settings password. Over HTTP it's basic auth with this user.
 extern const char *const API_SETTINGS_USER;
 extern const char *const API_SETTINGS_PASSWORD;

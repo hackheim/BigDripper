@@ -35,6 +35,7 @@ What the print engine is doing. Also the reply to `queue`, `mode` and `lines`, a
 
 ```json
 {
+  "api": 1,
   "boot": 2864173519,
   "mode": "text",
   "current": {"text": " BIG DRIPPER ", "font": "Drip", "invert": false},
@@ -51,6 +52,7 @@ What the print engine is doing. Also the reply to `queue`, `mode` and `lines`, a
 
 | Field | Meaning |
 |---|---|
+| `api` | The API version, bumped on changes an older or newer client would get wrong. The web UI warns when it doesn't match its own. |
 | `boot` | Random per boot. If it changes, the board rebooted and history sequence numbers started over. |
 | `mode` | `off`, `prime`, `trace`, `lines` or `text`. |
 | `current` | What Text mode prints now, or `null` during the pause between two messages. |

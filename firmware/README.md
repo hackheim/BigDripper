@@ -23,6 +23,8 @@ The pages live in `web/` as plain HTML, CSS and JavaScript. `scripts/embed_web.p
 
 The same API is also served over Bluetooth LE (`src/ble.cpp`), so the same page works from any HTTPS host through Web Bluetooth, in Chrome on Android or desktop (not iOS), and the phone keeps its own internet. `web/transport.js` picks the right transport: HTTP when the page came from the board, Bluetooth anywhere else. Both go through `src/api.cpp`, so the operations are the same either way.
 
+The hosted copy is on Cloudflare (https://bigdripper.hans-07c.workers.dev, a Worker serving static files); publish the current `web/` with `sh scripts/deploy_pages.sh` (after `npx wrangler@4 login` once). It keeps working offline once opened (`web/sw.js`). The page and the firmware are versioned separately, so the board reports its API version in every status and the page shows a warning if it isn't the one it was written for: bump `API_VERSION` in both `src/api.h` and `web/app.js` when the API changes incompatibly.
+
 To try the Bluetooth version without hosting it anywhere, serve `web/` locally. `localhost` counts as secure, so Web Bluetooth works there:
 
     python3 -m http.server -d web 8000

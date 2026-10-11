@@ -34,6 +34,7 @@ static void message_json(JsonObject o, const drip::MessageInfo &m) {
 void api_status_json(JsonDocument &doc) {
   drip::Status st = printer_status();
   Settings s = params_get();
+  doc["api"] = API_VERSION;
   doc["boot"] = boot_id;
   doc["mode"] = mode_name(st.mode);
   if (st.paused) {

@@ -7,6 +7,10 @@
 
 var $ = function (id) { return document.getElementById(id); };
 var S = null, CODES = [];
+// The board's API version this page is written for (API_VERSION in
+// src/api.h). The page may be served from elsewhere than the board, so the
+// two can differ.
+var API_VERSION = 1;
 var btns = document.querySelectorAll('#bar button');
 
 function el(tag, cls, txt) { var e = document.createElement(tag); if (cls) e.className = cls; e.textContent = txt; return e; }
@@ -23,6 +27,7 @@ function draw(s) {
   });
   $('lines').style.display = s.mode == 'lines' ? 'block' : 'none';
   $('dry').style.display = s.dry_run ? 'block' : 'none';
+  $('mismatch').style.display = s.api !== API_VERSION ? 'block' : 'none';
   if (document.activeElement != $('spacing')) $('spacing').value = s.lines_spacing;
   var c = $('cur'); c.textContent = '';
   if (s.mode == 'off') c.appendChild(el('span', 'empty', '(nothing — all modes off)'));
@@ -234,6 +239,9 @@ function loadEmoji() {
     count();
   }, function () {});
 }
+
+// Hosted (Bluetooth): keep working offline once opened. See sw.js.
+if (Board.kind == 'ble' && navigator.serviceWorker) navigator.serviceWorker.register('sw.js').catch(function () {});
 
 // Last, once everything above exists: the first events can come straight away.
 Board.listen({

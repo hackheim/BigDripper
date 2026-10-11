@@ -9,6 +9,7 @@ font-size:1em;font-weight:bold;line-height:1.2;padding:4px 0;background:#c0392b}
 #bar button[aria-pressed=true]{background:#1e8e3e}
 #bar small{display:block;font-size:.7em;font-weight:normal}
 #dry{display:none;background:#c0392b;color:#fff;text-align:center;padding:.4em;font-size:.9em;font-weight:bold}
+#mismatch{display:none;background:#e67e22;color:#fff;text-align:center;padding:.4em;font-size:.9em}
 #offline{display:none;background:#f1c40f;color:#111;text-align:center;padding:.4em;font-size:.9em}
 main{max-width:480px;margin:0 auto;padding:0 16px 2em}
 h2{font-size:1em;margin:1.4em 0 .4em;color:#555}
