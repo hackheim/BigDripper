@@ -2,6 +2,9 @@
 
 ### BigDripper – Controller Board and Operating Principle
 
+[![Watch the video](./pictures/bigDripper.png)](https://www.youtube.com/watch?v=_hVzhL3IneM)
+
+
 BigDripper is Hackheim’s version of the classic bicycle-mounted water printer (see links below). The printer is being developed as a community project, with the goal of having it completed by the end of September 2026.
 
 The printer consists of 16 solenoid valves mounted in a row across the bicycle trailer. The valves are supplied with water from a tank and pump. When a valve is opened briefly, it releases a small amount of water onto the ground, forming a single pixel. Together, the 16 valves produce one vertical column of 16 pixels. As the bicycle moves forward and new columns are printed in sequence, the trailer effectively operates as a large-scale dot-matrix printer.
